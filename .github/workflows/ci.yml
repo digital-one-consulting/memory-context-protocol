@@ -35,6 +35,8 @@ jobs:
           test -f "$d/.claude/commands/dream.md"
           test -f "$d/memory/MEMORY.md"
           out="$(./install.sh --check "$d")"
-          test -z "$out" && echo "healthy project: check is silent"
+          if [ -n "$out" ]; then echo "healthy project should be silent, printed: $out"; exit 1; fi
+          echo "healthy project: check is silent"
           for i in $(seq 1 120); do echo "- line $i"; done > "$d/memory/MEMORY.md"
-          ./install.sh --check "$d" | grep -q "budget 80" && echo "over-budget project: check fires"
+          if ! ./install.sh --check "$d" | grep -q "budget 80"; then echo "over-budget project did not fire"; exit 1; fi
+          echo "over-budget project: check fires"

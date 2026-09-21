@@ -13,8 +13,8 @@ measurement: <https://digital1.foundation/articles/the-first-layer/>.
    checks it on every pull request.
 2. **A hook change ships with its test.** `test/run.sh` must drive the new behaviour into its
    failure state and see it fire. A check that has never been seen to fail is not a check.
-   A hook change also updates the inline copy in `init/claude-context-init.md` (the suite
-   diffs them).
+   A hook change also updates the inline copy in `init/claude-context-init.md`: run
+   `init/sync-hooks.sh` (the suite diffs them and fails if they drift).
 3. **Hooks must never take the session down.** Every hook exits 0 (the Stop hook exits 2 only
    to block, deliberately) and tolerates a missing project directory, a missing git, a missing
    file. `set -e` is not used in hooks for this reason.

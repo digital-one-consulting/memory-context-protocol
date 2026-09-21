@@ -16,9 +16,9 @@ those files as you treat the repository's code: reviewed on the way in.
 ## Reporting
 
 Report a vulnerability privately through GitHub's security advisory form for this repository
-(Security → Report a vulnerability), or by email to foundation@digital1.foundation. Please do
-not open a public issue for a security report. You will receive an acknowledgement within five
-working days.
+(Security → Report a vulnerability). It reaches the maintainers listed in
+[CODEOWNERS](.github/CODEOWNERS) and nobody else. Please do not open a public issue for a
+security report. You will receive an acknowledgement within five working days.
 
 ## Supported versions
 

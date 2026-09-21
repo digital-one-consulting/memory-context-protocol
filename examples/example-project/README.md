@@ -5,14 +5,14 @@ installing it into your own. Nothing here is from a real estate.
 
 ```sh
 # from the repository root
-./install.sh --project examples/example-project     # puts hooks, commands and settings in place
-./install.sh --check   examples/example-project     # silent: every budget holds
+cp -R examples/example-project /tmp/example-project   # on a copy, so the example stays as committed
+./install.sh --project /tmp/example-project            # puts hooks, commands and settings in place
+./install.sh --check   /tmp/example-project            # silent: every budget holds
 ```
 
 To see the check fire, make the index long and run it again:
 
 ```sh
-for i in $(seq 1 120); do echo "- line $i"; done >> examples/example-project/memory/MEMORY.md
-./install.sh --check examples/example-project
-git checkout examples/example-project/memory/MEMORY.md
+for i in $(seq 1 120); do echo "- line $i"; done >> /tmp/example-project/memory/MEMORY.md
+./install.sh --check /tmp/example-project
 ```

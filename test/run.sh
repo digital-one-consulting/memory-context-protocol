@@ -55,7 +55,7 @@ out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" "$H
 assert_contains "CLAUDE.md at 9,216 bytes fires — the real threshold is what the arithmetic computes" "$out" "CLAUDE.md is 9 KB (budget 8 KB)"
 
 P=$(fresh_project transcript)
-enc="$(cd "$P" && pwd | sed 's#/#-#g')"
+enc="$(cd "$P" && pwd -P | sed 's#[^A-Za-z0-9]#-#g')"
 mkdir -p "$TMP/projects/$enc"
 mkfile "$TMP/projects/$enc/old.jsonl" $((5 * 1024 * 1024)); touch -t 202001010000 "$TMP/projects/$enc/old.jsonl"
 mkfile "$TMP/projects/$enc/live.jsonl" $((2 * 1024 * 1024))
@@ -72,6 +72,22 @@ P=$(fresh_project worktrees)
 mkdir -p "$P/.claude/worktrees/agent-a"; mkfile "$P/.claude/worktrees/agent-a/blob" $((3 * 512 * 1024))
 out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" MCP_WORKTREE_MB=1 "$HOOKS/context-budget.sh")
 assert_contains "fires on oversized agent worktrees" "$out" ".claude/worktrees is 2 MB"
+
+P="$TMP/enc test.dir_x"; rm -rf "$P"; mkdir -p "$P/memory"   # a dot, an underscore, a space
+printf '# Index\n' > "$P/memory/MEMORY.md"
+enc="$(cd "$P" && pwd -P | sed 's#[^A-Za-z0-9]#-#g')"
+mkdir -p "$TMP/projects/$enc"; mkfile "$TMP/projects/$enc/live.jsonl" $((2 * 1024 * 1024))
+out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/projects" MCP_TRANSCRIPT_MB=1 "$HOOKS/context-budget.sh")
+assert_contains "finds the transcript of a path with a dot, an underscore and a space (every non-alphanumeric → -)" "$out" "live transcript is 2 MB"
+out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/projects" MCP_TRANSCRIPT_MB=1 MCP_TRANSCRIPT_PATH="$TMP/projects/$enc/live.jsonl" "$HOOKS/context-budget.sh")
+assert_contains "measures the transcript the harness names" "$out" "live transcript is 2 MB"
+out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/projects" MCP_TRANSCRIPT_MB=1 MCP_TRANSCRIPT_PATH="$TMP/projects/$enc/not-yet.jsonl" "$HOOKS/context-budget.sh")
+assert_empty "says nothing at a fresh startup (the named transcript does not exist yet; the old 2 MB one is not measured)" "$out"
+
+P=$(fresh_project non-numeric)
+for i in $(seq 1 120); do echo "- line $i"; done > "$P/memory/MEMORY.md"
+out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" MCP_MEM_LINES=eighty "$HOOKS/context-budget.sh")
+assert_contains "a non-numeric override falls back to the default instead of skipping the check" "$out" "(budget 80)"
 
 P=$(fresh_project two-points)
 for i in $(seq 1 90); do echo "- line $i"; done > "$P/memory/MEMORY.md"; mkfile "$P/CLAUDE.md" 20000
@@ -102,11 +118,26 @@ assert_eq "exit 0" "$rc" "0"
 out=$(cd "$TMP" && CLAUDE_PROJECT_DIR="$TMP" "$HOOKS/prune-worktrees.sh"); rc=$?
 assert_eq "silent and exit 0 outside a git repository" "$out|$rc" "|0"
 
+R="$TMP/re po"; rm -rf "$R"; mkdir -p "$R"   # a path with a space, and a worktree left dirty
+( cd "$R" && git init -q -b main && git config user.email t@example.com && git config user.name t \
+  && echo a > a && git add a && git commit -qm init \
+  && git branch clean && git worktree add -q .claude/worktrees/clean clean \
+  && git branch dirty && git worktree add -q .claude/worktrees/dirty dirty \
+  && echo result > .claude/worktrees/dirty/result.txt ) 2>/dev/null
+out=$(cd "$R" && CLAUDE_PROJECT_DIR="$R" "$HOOKS/prune-worktrees.sh")
+assert_contains "prunes in a repository whose path contains a space" "$out" "pruned 1 merged agent worktree(s)"
+assert_no_dir "a clean worktree at the base tip is removed" "$R/.claude/worktrees/clean"
+assert_dir "a worktree with an uncommitted file is kept — a branch with no commits of its own is what a finished agent leaves" "$R/.claude/worktrees/dirty"
+assert_file "the uncommitted file survived" "$R/.claude/worktrees/dirty/result.txt"
+
 echo "stop-handoff.sh"
 S="$TMP/stop"; rm -rf "$S"; mkdir -p "$S/.claude/hooks"
 ( cd "$S" && git init -q -b main && git config user.email t@example.com && git config user.name t && echo a > a && git add a && git commit -qm init ) 2>/dev/null
 rc=0; err=$(cd "$S" && printf '{"stop_hook_active":true}' | CLAUDE_PROJECT_DIR="$S" "$HOOKS/stop-handoff.sh" 2>&1) || rc=$?
 assert_eq "exit 0 when stop_hook_active (no recursion)" "$rc" "0"
+N="$TMP/nogit"; rm -rf "$N"; mkdir -p "$N/.claude"; printf 'old\n' > "$N/.claude/session-state.md"; touch -t 202001010000 "$N/.claude/session-state.md"
+rc=0; err=$(cd "$N" && printf '{}' | CLAUDE_PROJECT_DIR="$N" "$HOOKS/stop-handoff.sh" 2>&1) || rc=$?
+assert_eq "exit 0 outside a git repository (no baseline to compare, so never a false block)" "$rc" "0"
 printf '## Handoff\n' > "$S/.claude/session-state.md"
 rc=0; err=$(cd "$S" && printf '{}' | CLAUDE_PROJECT_DIR="$S" "$HOOKS/stop-handoff.sh" 2>&1) || rc=$?
 assert_eq "exit 0 when the state file is fresh (throttle)" "$rc" "0"
@@ -139,6 +170,9 @@ for i in $(seq 1 100); do echo "- line $i"; done > "$P/memory/MEMORY.md"
 out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" "$HOOKS/session-start.sh")
 assert_contains "surfaces the budget report before the first turn" "$out" "over on 1 point(s)"
 assert_contains "tells the agent to say it in one line" "$out" "in one line before the first answer"
+mkfile "$TMP/live-from-stdin.jsonl" $((2 * 1024 * 1024))
+out=$(cd "$P" && printf '{"session_id":"x","transcript_path":"%s","cwd":"%s","hook_event_name":"SessionStart","source":"resume"}' "$TMP/live-from-stdin.jsonl" "$P" | CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" MCP_TRANSCRIPT_MB=1 "$HOOKS/session-start.sh")
+assert_contains "reads transcript_path from the harness's stdin and measures that file" "$out" "live transcript is 2 MB"
 
 echo "init/claude-context-init.md"
 # The init prompt carries the four hooks inline so it can be pasted standalone. A copy drifts;

@@ -10,6 +10,7 @@
 # so the mtime guard limits itself; the harness's stop_hook_active flag ends
 # the recursion.
 cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || exit 0
+git rev-parse --git-dir >/dev/null 2>&1 || exit 0   # no repository, no baseline to compare: never block
 
 INPUT=$(cat)
 case "$INPUT" in

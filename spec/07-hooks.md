@@ -20,8 +20,10 @@ misbehaving hook takes every session down with it.
 
 ## 7.2 `SessionStart` — `session-start.sh`
 
-Order: prune worktrees → weigh budgets → write the baseline → inject. See §5.1. Wired in
-`.claude/settings.json` (`hooks/settings.example.json`) with a 15-second timeout.
+Order: read the harness's stdin JSON (for `transcript_path`) → prune worktrees → weigh budgets
+→ write the baseline → inject. See §5.1. Wired in `.claude/settings.json`
+(`hooks/settings.example.json`) with a 15-second timeout. Reading stdin waits at most two
+seconds for an EOF; a hook that hangs is worse than one that guesses.
 
 ## 7.3 `Stop` — `stop-handoff.sh`
 
@@ -33,15 +35,20 @@ Blocks the stop (exit 2, instructions on stderr) only when BOTH hold:
 
 It reads the harness's JSON on stdin and exits 0 immediately when `stop_hook_active` is true,
 which ends the recursion the harness would otherwise allow. When it blocks it advances the
-baseline, so the very next stop passes: a session that changed nothing owes nothing, and the
-throttle is load-bearing — a loop that interrupts every stop gets disabled, and a disabled loop
-is no loop.
+baseline; the next stop passes once `/handoff` has refreshed the state file (the throttle), and
+if it has not — the agent wrote to the repository but never wrote the handoff — the guard
+fires again, by design. Outside a git repository it never blocks. A session that changed
+nothing owes nothing, and the throttle is load-bearing — a loop that interrupts every stop
+gets disabled, and a disabled loop is no loop.
 
 ## 7.4 Worktree pruning — `prune-worktrees.sh`
 
 Removes agent worktrees under `.claude/worktrees/` whose branch is fully merged into the base
 branch (`MCP_BASE_BRANCH`, default `main`). It MUST skip a locked worktree (a running agent
-holds its own) and MUST leave any unmerged branch alone. It prints what it did and exits 0.
+holds its own), MUST skip a worktree with uncommitted changes (a branch with no commits of its
+own counts as merged, and that is exactly what a finished agent leaves behind), MUST leave any
+unmerged branch alone, and removes without `--force` so git's own refusals stand. It prints
+what it did and exits 0.
 Each agent worktree is a full second checkout; four once held 1.7 GB inside one repository,
 and a linter walked into one and failed the main tree on another branch's code.
 

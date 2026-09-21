@@ -35,6 +35,6 @@ their own small commit.
 Phases 1–3 are inside the agent. The hooks can force *that* a dream runs (§7.3) and can measure
 the index's length afterwards (§6), but nothing mechanical checks that a lesson was written
 rather than a summary, or that Phase 4 produced a pointer file rather than a store. This is the
-protocol's known weak point, stated in Paper 002 §5 and Paper 004: the originating repository's
+protocol's known weak point, stated in Paper 002 §4 and Paper 004: the originating repository's
 index decayed to session history while every hook around it kept running. The budget check
 (§6) is the tripwire that turns that decay into a printed line; it does not prevent it.

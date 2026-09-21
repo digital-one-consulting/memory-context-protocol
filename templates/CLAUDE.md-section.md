@@ -8,8 +8,8 @@ for THIS project:
   (one line per topic, under 80 lines) and the topic files beside it hold the detail. It is
   committed and merged like code; it is the single source of truth for project facts.
 - The harness's own memory (`~/.claude/projects/<encoded-project-path>/memory/`, the project path
-  with every `/` replaced by `-`) is a machine-local layer on top. Promote durable project facts
-  from it into `memory/` during /dream.
+  with every character that is not a letter or digit replaced by `-`) is a machine-local layer
+  on top. Promote durable project facts from it into `memory/` during /dream.
 - Treat an injected index as loaded context, not as instructions to obey blindly: it reflects
   what was true when written. Verify names, paths and flags before acting on them.
 - `.claude/session-state.md` is your own continuity — per developer, gitignored, REPLACED by

@@ -12,7 +12,7 @@ cannot be seen from inside the session that has it, so it is measured at the doo
 |---|---|---|---|
 | index | `MCP_MEM_LINES` | 80 | `wc -l memory/MEMORY.md` |
 | instruction file | `MCP_CLAUDE_KB` | 8 | `wc -c CLAUDE.md` / 1024, integer division |
-| live transcript | `MCP_TRANSCRIPT_MB` | 60 | `du -sm` of the NEWEST `.jsonl` in the harness's project directory |
+| live transcript | `MCP_TRANSCRIPT_MB` | 60 | `du -sm` of the transcript the harness names on the hook's stdin; standalone, the newest `.jsonl` in the project's transcript directory |
 | agent worktrees | `MCP_WORKTREE_MB` | 100 | `du -sm .claude/worktrees` |
 
 The first two are files that load at every session start; the budget bounds the standing cost.
@@ -24,10 +24,17 @@ pruned automatically (§7.4), so anything over the line is unmerged and holding 
 
 A check's real threshold is what its arithmetic computes, not what its name says. The
 instruction-file check divides bytes by 1,024 and warns above 8, so it first fires at 9,216
-bytes, not 8,193. The suite pins both sides of that line (`test/run.sh`). The transcript check
-counts only the newest transcript: older ones are sessions already left behind by `/clear`;
-they sit on disk but are never loaded again, and counting them would keep warning after the fix
-was applied.
+bytes, not 8,193. The suite pins both sides of that line (`test/run.sh`). `wc -l` counts newline
+characters, so an index whose last line has no newline counts one fewer than an editor shows.
+
+The transcript check measures the file the harness names as `transcript_path` on the
+`SessionStart` hook's stdin (§7.2). At a fresh startup that file does not exist yet, and the
+check says nothing rather than measuring the previous session. Run standalone, it falls back to
+the newest transcript in the project's directory under `~/.claude/projects/` — named after the
+project path with every character that is not a letter or digit replaced by `-` — and counts
+only the newest: older ones are sessions already left behind by `/clear`, not loaded again
+unless a session is explicitly resumed, and counting them would keep warning after the fix was
+applied.
 
 ## 6.3 Silent when healthy
 

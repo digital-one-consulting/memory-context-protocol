@@ -8,7 +8,13 @@
 #
 # Never overwrites an existing file unless --force is given; prints what it did.
 set -eu
-SRC="$(cd "$(dirname "$0")" && pwd)"
+# resolve a symlinked invocation (a relative readlink is relative to the link's directory)
+SELF="$0"
+while [ -L "$SELF" ]; do
+  L="$(readlink "$SELF")"
+  case "$L" in /*) SELF="$L" ;; *) SELF="$(dirname "$SELF")/$L" ;; esac
+done
+SRC="$(cd "$(dirname "$SELF")" && pwd)"
 force=0; mode=""; target=""
 for a in "$@"; do
   case "$a" in
@@ -53,7 +59,7 @@ case "$mode" in
       git -C "$d" update-index --chmod=+x .claude/hooks/context-budget.sh .claude/hooks/prune-worktrees.sh .claude/hooks/session-start.sh .claude/hooks/stop-handoff.sh >/dev/null 2>&1 \
         && printf '  git   hooks marked executable in the index (100755) — commit them that way\n'
     fi
-    if [ -f "$d/.gitignore" ] && grep -q 'memory-context-protocol' "$d/.gitignore"; then
+    if [ -f "$d/.gitignore" ] && grep -qF '# memory-context-protocol — local-only' "$d/.gitignore"; then
       printf '  keep  %s (protocol lines present)\n' "$d/.gitignore"
     else
       nl=""; [ -f "$d/.gitignore" ] && [ -n "$(tail -c1 "$d/.gitignore")" ] && nl=$'\n'
@@ -67,7 +73,7 @@ case "$mode" in
     ;;
 
   --global)
-    f="${CLAUDE_HOME:-$HOME/.claude}/CLAUDE.md"
+    f="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md"   # CLAUDE_CONFIG_DIR is the harness's own override
     mkdir -p "$(dirname "$f")"
     if [ -f "$f" ] && grep -q 'memory-context-protocol: begin' "$f"; then
       echo "  keep  $f (protocol section present)"

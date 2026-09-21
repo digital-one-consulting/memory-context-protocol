@@ -13,8 +13,18 @@
 # The budget check runs HERE, in the repository where the session starts,
 # because a budget binds where it is checked and a check in a parent folder
 # does not cover a session started one directory below.
+H="$(cd "$(dirname "$0")" && pwd)"   # resolved before the cd: $0 may be relative
 cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || exit 0
-H="$(cd "$(dirname "$0")" && pwd)"
+
+# The harness writes a JSON object on stdin ({"session_id", "transcript_path", "cwd",
+# "hook_event_name", "source"}). The transcript path is the one file the budget check
+# cannot find reliably on its own, so it is read here and passed on. Read only when stdin
+# is not a terminal, and never wait more than two seconds for an EOF that a harness
+# always sends — a hook that hangs is worse than one that guesses.
+INPUT=""
+if [ ! -t 0 ]; then IFS= read -r -t 2 -d '' INPUT || true; fi
+TRANSCRIPT="$(printf '%s' "$INPUT" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+[ -n "$TRANSCRIPT" ] && export MCP_TRANSCRIPT_PATH="$TRANSCRIPT"
 
 MEMORY_INDEX="${MCP_MEMORY_INDEX:-memory/MEMORY.md}"
 STATE="${MCP_SESSION_STATE:-.claude/session-state.md}"

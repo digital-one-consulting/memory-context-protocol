@@ -20,7 +20,8 @@ a decision, a correction, a path, a gotcha — is not durable until it is in the
 
 The harness's own per-project memory directory. In Claude Code this is
 `~/.claude/projects/<encoded-project-path>/memory/`, where the encoded path is the project's
-absolute path with every `/` replaced by `-`; it is loaded automatically when present.
+absolute path with every character that is not a letter or digit replaced by `-`; it is loaded
+automatically when present.
 
 This layer is a scratch layer on top of the shared one. Consolidation (§4.2) MUST promote
 durable project facts from it into `memory/`. Nothing durable is allowed to end its life

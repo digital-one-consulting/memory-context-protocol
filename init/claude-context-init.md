@@ -309,12 +309,15 @@ Create `.claude/hooks/context-budget.sh` (chmod +x):
 set -u
 cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || exit 0
 
+# num <value> <default>: an override that is not a whole number falls back to the default.
+num() { case "$1" in ''|*[!0-9]*) echo "$2" ;; *) echo "$1" ;; esac; }
+
 # Each threshold is a line that was crossed in a long-running project before
 # this check existed. They are scars, not science; tune them to your estate.
-MEM_LINES="${MCP_MEM_LINES:-80}"          # memory/MEMORY.md is an INDEX; it loads at every session start
-CLAUDE_KB="${MCP_CLAUDE_KB:-8}"           # the root CLAUDE.md, likewise
-TRANSCRIPT_MB="${MCP_TRANSCRIPT_MB:-60}"  # past this, /clear buys more than any trimming can
-WORKTREE_MB="${MCP_WORKTREE_MB:-100}"     # agent checkouts are scratch and should not accumulate
+MEM_LINES=$(num "${MCP_MEM_LINES:-}" 80)          # memory/MEMORY.md is an INDEX; it loads at every session start
+CLAUDE_KB=$(num "${MCP_CLAUDE_KB:-}" 8)           # the root CLAUDE.md, likewise
+TRANSCRIPT_MB=$(num "${MCP_TRANSCRIPT_MB:-}" 60)  # past this, /clear buys more than any trimming can
+WORKTREE_MB=$(num "${MCP_WORKTREE_MB:-}" 100)     # agent checkouts are scratch and should not accumulate
 MEMORY_INDEX="${MCP_MEMORY_INDEX:-memory/MEMORY.md}"
 PROJECTS_DIR="${MCP_PROJECTS_DIR:-$HOME/.claude/projects}"
 
@@ -322,6 +325,7 @@ warn=""
 add() { warn="${warn}$1"$'\n'; }
 
 if [ -f "$MEMORY_INDEX" ]; then
+  # wc -l counts newline characters: an index whose last line has no newline counts one fewer.
   n=$(wc -l < "$MEMORY_INDEX" | tr -d ' ')
   [ "$n" -gt "$MEM_LINES" ] && add "- $MEMORY_INDEX is ${n} lines (budget ${MEM_LINES}). It is an INDEX and loads at every session start: one line per topic, detail in the topic file. Fix it in /dream."
 fi
@@ -333,26 +337,37 @@ if [ -f CLAUDE.md ]; then
   [ "$kb" -gt "$CLAUDE_KB" ] && add "- CLAUDE.md is ${kb} KB (budget ${CLAUDE_KB} KB) and loads at every session start. Move reference material into a skill or memory/ and keep only what must govern every answer."
 fi
 
-# The LIVE transcript for THIS project directory is the newest .jsonl under the
-# harness's projects directory (the project path with every / replaced by -).
-# Older transcripts are sessions already left behind by /clear: they sit on
-# disk but are never loaded again, so counting them would keep warning after
-# the fix was applied.
-enc="$(pwd | sed 's#/#-#g')"
-tdir="$PROJECTS_DIR/$enc"
-if [ -d "$tdir" ]; then
-  # ls -t is the portable newest-first; transcript names are UUIDs, so SC2012 does not apply.
-  # shellcheck disable=SC2012
-  live=$(ls -t "$tdir"/*.jsonl 2>/dev/null | head -1)
-  mb=0
-  [ -n "$live" ] && mb=$(du -sm "$live" 2>/dev/null | cut -f1)
+# The LIVE transcript. The harness hands SessionStart its path on stdin and
+# session-start.sh passes it on as MCP_TRANSCRIPT_PATH; at a fresh startup the
+# file does not exist yet, and then there is nothing to measure and nothing is
+# said. Run standalone, fall back to the newest transcript in the project's
+# directory under the harness's projects directory, whose name is the project
+# path with every character that is not a letter or digit replaced by "-".
+# Older transcripts there are sessions already left behind by /clear: they sit
+# on disk and are not loaded again unless a session is explicitly resumed, so
+# counting them would keep warning after the fix was applied.
+live=""
+if [ -n "${MCP_TRANSCRIPT_PATH:-}" ]; then
+  [ -f "$MCP_TRANSCRIPT_PATH" ] && live="$MCP_TRANSCRIPT_PATH"
+else
+  enc="$(pwd -P | sed 's#[^A-Za-z0-9]#-#g')"
+  tdir="$PROJECTS_DIR/$enc"
+  if [ -d "$tdir" ]; then
+    # ls -t is the portable newest-first; transcript names are UUIDs, so SC2012 does not apply.
+    # shellcheck disable=SC2012
+    live=$(ls -t "$tdir"/*.jsonl 2>/dev/null | head -1)
+  fi
+fi
+if [ -n "$live" ]; then
+  mb=$(du -sm "$live" 2>/dev/null | cut -f1)
   if [ "${mb:-0}" -gt "$TRANSCRIPT_MB" ]; then
     add "- This project's live transcript is ${mb} MB. A session this long sits at its context ceiling, so every question is paying the ceiling regardless of size. **Finish with /handoff, then /clear.** The memory files are the continuity, not the transcript."
   fi
 fi
 
 if [ -d .claude/worktrees ]; then
-  mb=$(du -sm .claude/worktrees 2>/dev/null | cut -f1)
+  # the trailing slash follows a symlinked worktrees directory instead of measuring the link
+  mb=$(du -sm .claude/worktrees/ 2>/dev/null | cut -f1)
   [ "${mb:-0}" -gt "$WORKTREE_MB" ] && add "- .claude/worktrees is ${mb} MB. Each agent worktree is a full checkout; merged ones are pruned at session start by prune-worktrees.sh, so anything left is unmerged and holding real work."
 fi
 
@@ -366,7 +381,7 @@ Create `.claude/hooks/prune-worktrees.sh` (chmod +x):
 
 ```bash
 #!/usr/bin/env bash
-# prune-worktrees.sh — remove agent worktrees whose branch has already landed on main.
+# prune-worktrees.sh — remove agent worktrees whose branch has already landed on the base branch.
 #
 # Each agent worktree is a full second checkout, most of it dependencies. Four
 # of them once held 1.7 GB inside one repository — not mainly a disk problem:
@@ -376,8 +391,12 @@ Create `.claude/hooks/prune-worktrees.sh` (chmod +x):
 #
 # Safe by construction, and it never guesses:
 #   - a LOCKED worktree is skipped, which is how a running agent holds its own;
+#   - a worktree with UNCOMMITTED changes is skipped: a branch with no commits
+#     of its own sits at the base branch's tip and counts as merged, and that
+#     is exactly what a finished agent leaves behind — its work still unstaged;
 #   - a branch not fully merged into the base branch is left alone, so nothing
 #     unmerged is ever discarded;
+#   - it removes without --force, so git's own refusals (dirty, locked) stand;
 #   - it prints what it did and always exits 0, because a hook that fails must
 #     not take the session down with it.
 set -u
@@ -389,19 +408,26 @@ BASE="${MCP_BASE_BRANCH:-main}"
 WORKTREE_DIR="${MCP_WORKTREE_DIR:-.claude/worktrees}"
 
 removed=0
-# --porcelain gives one "worktree <path>" line per entry
-while IFS= read -r path; do
-  case "$path" in *"$WORKTREE_DIR/"*) ;; *) continue ;; esac
-  # a locked worktree belongs to a live agent
-  [ -f "$(git rev-parse --git-dir)/worktrees/$(basename "$path")/locked" ] && continue
-  branch=$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null) || continue
-  if [ -z "$branch" ] || [ "$branch" = "HEAD" ]; then continue; fi
-  # only what the base branch already contains
-  git merge-base --is-ancestor "$branch" "$BASE" 2>/dev/null || continue
-  git worktree remove --force "$path" >/dev/null 2>&1 || continue
-  git branch -D "$branch" >/dev/null 2>&1
+# --porcelain prints one block per worktree: "worktree <path>", "branch refs/heads/<name>",
+# and "locked" when held. The path is taken whole — it may contain spaces.
+while IFS=$'\t' read -r locked branch path; do
+  [ -n "$path" ] || continue
+  case "$path" in *"/$WORKTREE_DIR/"*) ;; *) continue ;; esac
+  [ "$locked" = "1" ] && continue                                   # a live agent holds its own
+  [ -n "$branch" ] || continue                                      # detached HEAD: not ours to judge
+  [ -d "$path" ] || continue
+  [ -z "$(git -C "$path" status --porcelain 2>/dev/null)" ] || continue   # uncommitted work stays
+  git merge-base --is-ancestor "$branch" "$BASE" 2>/dev/null || continue  # only what the base contains
+  git worktree remove "$path" >/dev/null 2>&1 || continue
+  git branch -D "$branch" >/dev/null 2>&1                           # merged, so the branch is history
   removed=$((removed + 1))
-done < <(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2}')
+done < <(git worktree list --porcelain 2>/dev/null | awk '
+  function flush() { if (p != "") printf "%s\t%s\t%s\n", l, b, p; p = ""; b = ""; l = 0 }
+  /^worktree / { flush(); p = substr($0, 10); next }
+  /^branch /   { b = substr($0, 8); sub(/^refs\/heads\//, "", b); next }
+  /^locked/    { l = 1; next }
+  /^$/         { flush(); next }
+  END          { flush() }')
 
 git worktree prune >/dev/null 2>&1
 [ "$removed" -gt 0 ] && echo "pruned $removed merged agent worktree(s)"
@@ -426,8 +452,18 @@ Create `.claude/hooks/session-start.sh` (chmod +x):
 # The budget check runs HERE, in the repository where the session starts,
 # because a budget binds where it is checked and a check in a parent folder
 # does not cover a session started one directory below.
+H="$(cd "$(dirname "$0")" && pwd)"   # resolved before the cd: $0 may be relative
 cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || exit 0
-H="$(cd "$(dirname "$0")" && pwd)"
+
+# The harness writes a JSON object on stdin ({"session_id", "transcript_path", "cwd",
+# "hook_event_name", "source"}). The transcript path is the one file the budget check
+# cannot find reliably on its own, so it is read here and passed on. Read only when stdin
+# is not a terminal, and never wait more than two seconds for an EOF that a harness
+# always sends — a hook that hangs is worse than one that guesses.
+INPUT=""
+if [ ! -t 0 ]; then IFS= read -r -t 2 -d '' INPUT || true; fi
+TRANSCRIPT="$(printf '%s' "$INPUT" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+[ -n "$TRANSCRIPT" ] && export MCP_TRANSCRIPT_PATH="$TRANSCRIPT"
 
 MEMORY_INDEX="${MCP_MEMORY_INDEX:-memory/MEMORY.md}"
 STATE="${MCP_SESSION_STATE:-.claude/session-state.md}"
@@ -515,6 +551,7 @@ Create `.claude/hooks/stop-handoff.sh` (chmod +x):
 # so the mtime guard limits itself; the harness's stop_hook_active flag ends
 # the recursion.
 cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || exit 0
+git rev-parse --git-dir >/dev/null 2>&1 || exit 0   # no repository, no baseline to compare: never block
 
 INPUT=$(cat)
 case "$INPUT" in

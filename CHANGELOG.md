@@ -19,6 +19,29 @@ All notable changes to this project are recorded here. The format follows
   `100644` is silently dead on every fresh clone.
 
 ### Fixed
+- **`prune-worktrees.sh` could discard uncommitted agent work.** A worktree whose branch has no
+  commits of its own sits at the base branch's tip and counts as merged; `git worktree remove
+  --force` then removed it with every unstaged file in it — exactly what a finished agent leaves
+  behind. It now skips any worktree with uncommitted changes and removes without `--force`, so
+  git's own refusals stand; the lock check reads the porcelain `locked` line rather than a
+  basename; paths with spaces are read whole. Three new assertions pin each.
+- **The transcript budget looked in the wrong place.** The harness encodes a project path by
+  replacing every character that is not a letter or digit with `-`, not only `/`, so any path
+  with a dot, underscore or space was silently never measured; and at a fresh startup the
+  newest transcript on disk is the previous session's. `session-start.sh` now reads the
+  harness's stdin JSON and passes `transcript_path` to the check; the check measures that file,
+  says nothing when it does not exist yet, and falls back to the corrected encoding when run
+  standalone. The spec, the template and the fixtures said `/` too; corrected.
+- CI's fresh-install assertions were `A && echo`, which cannot fail under `bash -e`; they now
+  exit 1 on the wrong outcome.
+- The security contact was an address that bounces; reports go through GitHub's advisory form
+  to the maintainers in CODEOWNERS.
+- Minor: a non-numeric `MCP_*` override falls back to the default instead of skipping the
+  check; a symlinked `.claude/worktrees` is measured, not the link; the Stop hook never blocks
+  outside a git repository; `install.sh` resolves a symlinked invocation and honours
+  `CLAUDE_CONFIG_DIR`; the `.gitignore` idempotence check matches the marker line, not the
+  project name; spec §4 cited a section of Paper 002 that does not exist (§5 → §4); spec §7 no
+  longer claims the very next stop always passes.
 - The worktree fixture in `test/run.sh` was 2 MiB; `du -m` rounds up and counts the directory's
   own block on ext4, so Linux reported 3 MB and the assertion failed there while passing on
   APFS. The fixture is 1.5 MiB, which rounds to 2 on both.
