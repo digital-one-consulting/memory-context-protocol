@@ -151,7 +151,7 @@ for h in context-budget.sh prune-worktrees.sh session-start.sh stop-handoff.sh; 
     inblk && /^```$/ { exit }
     inblk { print }
   ' "$INIT" > "$TMP/init-$h"
-  if [ -s "$TMP/init-$h" ] && diff -q "$TMP/init-$h" <(sed -e '$a\' "$HOOKS/$h") >/dev/null; then ok "inline copy of $h matches hooks/$h"
+  if [ -s "$TMP/init-$h" ] && diff -q "$TMP/init-$h" "$HOOKS/$h" >/dev/null; then ok "inline copy of $h matches hooks/$h"
   else bad "inline copy of $h matches hooks/$h" "the init prompt's fenced block differs from the file (rebuild the prompt)"; fi
 done
 
