@@ -1,0 +1,9 @@
+Memory Context Protocol
+Copyright 2026 Stichting Digital One Foundation i.o. and contributors
+
+Code in this repository is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The specification text under spec/ and the templates under templates/ are additionally
+licensed under the Creative Commons Attribution 4.0 International licence (see LICENSE-docs),
+so that they may be quoted and adapted on the same terms as the papers they accompany:
+The First Layer, Digital One Foundation, https://digital1.foundation/articles/the-first-layer/

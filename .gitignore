@@ -1,0 +1,4 @@
+.DS_Store
+# the example project keeps its local-only files out, like any installed project
+examples/*/.claude/session-state.md
+examples/*/.claude/hooks/.session-baseline

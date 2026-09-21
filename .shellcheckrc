@@ -1,0 +1,2 @@
+# CI runs: shellcheck -S style hooks/*.sh test/run.sh install.sh
+shell=bash

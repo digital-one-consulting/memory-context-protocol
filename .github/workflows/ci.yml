@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: shellcheck + hook suite (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck (macOS)
+        if: runner.os == 'macOS'
+        run: brew install shellcheck
+
+      - name: shellcheck
+        run: shellcheck -S style hooks/*.sh test/run.sh install.sh
+
+      - name: hook suite — every check driven into its failure state
+        run: test/run.sh
+
+      - name: install into a fresh project and run the budget check
+        run: |
+          d="$(mktemp -d)"
+          git -C "$d" init -q -b main
+          ./install.sh --project "$d"
+          test -x "$d/.claude/hooks/context-budget.sh"
+          test -f "$d/.claude/commands/dream.md"
+          test -f "$d/memory/MEMORY.md"
+          out="$(./install.sh --check "$d")"
+          test -z "$out" && echo "healthy project: check is silent"
+          for i in $(seq 1 120); do echo "- line $i"; done > "$d/memory/MEMORY.md"
+          ./install.sh --check "$d" | grep -q "budget 80" && echo "over-budget project: check fires"
