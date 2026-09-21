@@ -1,0 +1,29 @@
+# .claudeignore — what the agent should never read as project context.
+# Generated artefacts, dependencies, editor state, logs. Add the project's own: large data
+# files, generated code, raw exports, binary assets.
+.git/
+**/bin/
+**/obj/
+**/dist/
+**/build/
+**/.next/
+**/out/
+**/__pycache__/
+**/*.pyc
+**/target/
+**/node_modules/
+**/.venv/
+**/venv/
+**/.env/
+**/vendor/
+**/.vs/
+**/.idea/
+**/.vscode/
+**/*.user
+**/.DS_Store
+**/*.log
+**/*.pid
+**/logs/
+**/*.min.js
+**/*.min.css
+**/*.map

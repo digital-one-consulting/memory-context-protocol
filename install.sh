@@ -45,6 +45,14 @@ case "$mode" in
     done
     put "$SRC/hooks/settings.example.json" "$d/.claude/settings.json"
     put "$SRC/templates/MEMORY.md" "$d/memory/MEMORY.md"
+    put "$SRC/templates/claudeignore" "$d/.claudeignore"
+    # chmod alone is lost on a fresh clone: git stores the mode, and a hook tracked as 100644 is
+    # silently dead (exit 126) when the harness runs it. Set the bit in the index too.
+    if git -C "$d" rev-parse --git-dir >/dev/null 2>&1; then
+      git -C "$d" add --intent-to-add .claude/hooks/*.sh >/dev/null 2>&1 || true
+      git -C "$d" update-index --chmod=+x .claude/hooks/context-budget.sh .claude/hooks/prune-worktrees.sh .claude/hooks/session-start.sh .claude/hooks/stop-handoff.sh >/dev/null 2>&1 \
+        && printf '  git   hooks marked executable in the index (100755) — commit them that way\n'
+    fi
     if [ -f "$d/.gitignore" ] && grep -q 'memory-context-protocol' "$d/.gitignore"; then
       printf '  keep  %s (protocol lines present)\n' "$d/.gitignore"
     else

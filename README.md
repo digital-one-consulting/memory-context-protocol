@@ -62,6 +62,30 @@ The thresholds are scars, not science: each is a line that was crossed in a long
 project before the check existed. Override them with `MCP_MEM_LINES`, `MCP_CLAUDE_KB`,
 `MCP_TRANSCRIPT_MB`, `MCP_WORKTREE_MB`.
 
+## The three context layers
+
+The memory is the third of three layers, and the budgets exist because the first is always
+loaded:
+
+| Layer | Loaded | Holds |
+|---|---|---|
+| `CLAUDE.md` | always | the project's ID card: what the agent would get wrong or ask about — stack, component map, glossary, conventions, commands. Under 200 lines and under 8 KB. |
+| `.claude/skills/*/SKILL.md` | on demand | deep reference — architecture, domain — loaded only when the task needs it. |
+| `memory/` | index at start, topics on demand | what was learned across sessions: decisions, gotchas, corrections. |
+
+Reference material that would push `CLAUDE.md` over its budget moves down a layer; it is not
+trimmed, it is loaded later. Skeletons for the two skills are in `templates/skills/`.
+
+## Start a new project: the init prompt
+
+`init/claude-context-init.md` is a prompt to paste into a Claude Code session at the root of a
+project. It discovers the project — it does not assume a stack — and works through ten phases:
+inventory, component map, domain extraction, convention detection, the root `CLAUDE.md`, module
+`CLAUDE.md` files, skills and commands, the hooks, `.claudeignore`, verification. Run again in
+a project that already has `.claude/`, it switches to UPDATE MODE and proposes changes rather
+than applying them. The hooks it carries are this repository's, verbatim; the test suite fails
+if they drift.
+
 ## Install
 
 Into one project (copies hooks, commands, settings and templates; never overwrites an existing file):
@@ -128,15 +152,22 @@ Stated in the fourth paper and repeated here so they are not discovered in produ
 | Path | What |
 |---|---|
 | `spec/` | the protocol, normative, section by section |
+| `init/` | the init prompt: bootstrap a project in ten phases, or update one |
 | `hooks/` | the four hooks and an example `settings.json` |
 | `skills/` | the five slash commands |
-| `templates/` | the `CLAUDE.md` section, index, topic, feedback and session-state templates, the gitignore lines |
+| `templates/` | the `CLAUDE.md` section, index, topic, feedback, session-state and module templates, the two skill skeletons, `.claudeignore`, the gitignore lines |
 | `examples/example-project/` | a small synthetic project with the protocol installed |
 | `test/run.sh` | the suite |
 | `install.sh` | project, global and check modes |
 
-## Provenance
+## Lineage and provenance
 
-The protocol was built and measured on one practitioner's estate over three months and the
-failures that shaped it are printed, with dates and failing inputs, in the papers. The estate's
-paths, names and memory contents are not in this repository; only the mechanism is.
+The protocol began as an internal system guide and init prompt, *Claude Code Context & Memory
+System*, first written in April 2026 with the three layers, the five commands and the
+`/dream` consolidation, and made hook-automated in June 2026 — the `SessionStart` injection,
+the baseline snapshot and the guarded `Stop` with its 45-minute throttle date from that
+revision. It was then ported to several projects on one practitioner's estate, where the
+budgets, the worktree pruning, the comment-stripped injection and the feedback files were
+added as each line was crossed; the failures that shaped them are printed, with dates and
+failing inputs, in the papers. The estate's paths, names and memory contents are not in this
+repository; only the mechanism is.

@@ -67,7 +67,9 @@ out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/projects" MCP_TR
 assert_empty "silent when only an OLD transcript is over budget (only the newest counts)" "$out"
 
 P=$(fresh_project worktrees)
-mkdir -p "$P/.claude/worktrees/agent-a"; mkfile "$P/.claude/worktrees/agent-a/blob" $((2 * 1024 * 1024))
+# 1.5 MiB, not 2: du -m rounds UP and counts the directory's own block on ext4, so a 2 MiB file
+# in a directory reports 3 MB on Linux and 2 MB on APFS. 1.5 MiB rounds to 2 on both.
+mkdir -p "$P/.claude/worktrees/agent-a"; mkfile "$P/.claude/worktrees/agent-a/blob" $((3 * 512 * 1024))
 out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" MCP_WORKTREE_MB=1 "$HOOKS/context-budget.sh")
 assert_contains "fires on oversized agent worktrees" "$out" ".claude/worktrees is 2 MB"
 
@@ -137,6 +139,21 @@ for i in $(seq 1 100); do echo "- line $i"; done > "$P/memory/MEMORY.md"
 out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" "$HOOKS/session-start.sh")
 assert_contains "surfaces the budget report before the first turn" "$out" "over on 1 point(s)"
 assert_contains "tells the agent to say it in one line" "$out" "in one line before the first answer"
+
+echo "init/claude-context-init.md"
+# The init prompt carries the four hooks inline so it can be pasted standalone. A copy drifts;
+# this pins each fenced block to the file it claims to be.
+INIT="$ROOT/init/claude-context-init.md"
+for h in context-budget.sh prune-worktrees.sh session-start.sh stop-handoff.sh; do
+  awk -v name="$h" '
+    $0 == "Create `.claude/hooks/" name "` (chmod +x):" { want = 1; next }
+    want && /^```bash$/ { inblk = 1; next }
+    inblk && /^```$/ { exit }
+    inblk { print }
+  ' "$INIT" > "$TMP/init-$h"
+  if [ -s "$TMP/init-$h" ] && diff -q "$TMP/init-$h" <(sed -e '$a\' "$HOOKS/$h") >/dev/null; then ok "inline copy of $h matches hooks/$h"
+  else bad "inline copy of $h matches hooks/$h" "the init prompt's fenced block differs from the file (rebuild the prompt)"; fi
+done
 
 echo
 echo "$pass passed, $fail failed"

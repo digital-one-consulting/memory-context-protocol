@@ -4,6 +4,25 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] — 2026-09-21
+
+### Added
+- `init/claude-context-init.md` — the init prompt: ten INIT phases (inventory → verification)
+  and five UPDATE phases, stack-agnostic, carrying the four hooks verbatim. Descended from the
+  April/June 2026 system guide the protocol began as (README, Lineage).
+- `templates/skills/{architecture,domain}/SKILL.md`, `templates/module-CLAUDE.md`,
+  `templates/claudeignore` — the on-demand context layer and the ignore file the init prompt
+  creates.
+- `test/run.sh` pins the init prompt's inline hook copies to `hooks/` (four assertions).
+- `install.sh --project` writes `.claudeignore` when absent and, inside a git repository, sets
+  the executable bit in the index (`git update-index --chmod=+x`), because a hook committed as
+  `100644` is silently dead on every fresh clone.
+
+### Fixed
+- The worktree fixture in `test/run.sh` was 2 MiB; `du -m` rounds up and counts the directory's
+  own block on ext4, so Linux reported 3 MB and the assertion failed there while passing on
+  APFS. The fixture is 1.5 MiB, which rounds to 2 on both.
+
 ## [0.1.0] — 2026-09-21
 
 First public release: the protocol as measured in *The First Layer*
@@ -36,4 +55,5 @@ First public release: the protocol as measured in *The First Layer*
 - Thresholds and paths are environment-overridable so the suite can prove the checks fire
   without a sixty-megabyte fixture.
 
+[0.1.1]: https://github.com/digital-one-consulting/memory-context-protocol/releases/tag/v0.1.1
 [0.1.0]: https://github.com/digital-one-consulting/memory-context-protocol/releases/tag/v0.1.0

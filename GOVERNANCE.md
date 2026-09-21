@@ -12,6 +12,10 @@ working.
 
 The Foundation's rule for its own board applies here: no single interest holds a majority.
 
+The protocol predates the Foundation: it was written as an internal system guide and init
+prompt in April 2026 and hook-automated in June 2026, then measured across several projects
+before being published here under the Foundation's stewardship (see README, Lineage).
+
 ## Roles
 
 - **Maintainers** review and merge, cut releases, and hold the final say on what the protocol

@@ -1,7 +1,10 @@
 # §1 Layers
 
-The protocol keeps two memory layers with one source of truth, and one file that belongs to
-neither.
+Context loads in three layers — `CLAUDE.md` always, `.claude/skills/` on demand, `memory/` as
+an index at start and topics on demand — and the memory layer itself has two stores with one
+source of truth, plus one file that belongs to neither. This section is about the memory
+stores; the three context layers and the init prompt that builds them are described in the
+README.
 
 ## 1.1 The shared layer — `memory/`
 

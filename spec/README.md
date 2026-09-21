@@ -9,6 +9,11 @@ that produced it, is in the papers: <https://digital1.foundation/articles/the-fi
 
 The key words MUST, SHOULD and MAY are used as in RFC 2119.
 
+Lineage: this specification formalises the *Claude Code Context & Memory System* (an internal
+system guide and init prompt, April 2026; hook-automated June 2026), extended with the budgets
+and the read-path stripping that the papers measured. The init prompt lives on as
+`init/claude-context-init.md`.
+
 | § | Section | What it fixes |
 |---|---|---|
 | 1 | [Layers](01-layers.md) | two memory layers with one source of truth, and a third file that is neither |
