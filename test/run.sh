@@ -71,6 +71,12 @@ P=$(fresh_project worktrees)
 # in a directory reports 3 MB on Linux and 2 MB on APFS. 1.5 MiB rounds to 2 on both.
 mkdir -p "$P/.claude/worktrees/agent-a"; mkfile "$P/.claude/worktrees/agent-a/blob" $((3 * 512 * 1024))
 out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" MCP_WORKTREE_MB=1 "$HOOKS/context-budget.sh")
+# du runs in the background (20 s at 31 GB timed the session-start hook out), so the first
+# session has no measure yet and says nothing; the next one reads the cached size.
+assert_empty "the first run is silent and measures in the background" "$out"
+for _ in $(seq 1 50); do [ -s "$P/.claude/.worktrees-mb" ] && break; sleep 0.1; done
+assert_file "the background measure writes its cache" "$P/.claude/.worktrees-mb"
+out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" MCP_WORKTREE_MB=1 "$HOOKS/context-budget.sh")
 assert_contains "fires on oversized agent worktrees" "$out" ".claude/worktrees is 2 MB"
 
 P="$TMP/enc test.dir_x"; rm -rf "$P"; mkdir -p "$P/memory"   # a dot, an underscore, a space

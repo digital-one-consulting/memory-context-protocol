@@ -366,8 +366,16 @@ if [ -n "$live" ]; then
 fi
 
 if [ -d .claude/worktrees ]; then
-  # the trailing slash follows a symlinked worktrees directory instead of measuring the link
-  mb=$(du -sm .claude/worktrees/ 2>/dev/null | cut -f1)
+  # du over the worktrees took 20 s at 31 GB (2026-11-06) and pushed session-start.sh past its 15 s
+  # hook timeout, so the project's memory did not load. The hook now reads the last measure and
+  # starts the next one in the background; a stale number for one session is harmless.
+  cache=.claude/.worktrees-mb
+  mb=0
+  if [ -f "$cache" ]; then mb=$(tr -cd '0-9' < "$cache"); fi
+  if [ -z "$(find "$cache" -mmin -60 2>/dev/null)" ]; then
+    # the trailing slash follows a symlinked worktrees directory instead of measuring the link
+    (du -sm .claude/worktrees/ 2>/dev/null | cut -f1 > "$cache.tmp" && mv "$cache.tmp" "$cache") </dev/null >/dev/null 2>&1 &
+  fi
   [ "${mb:-0}" -gt "$WORKTREE_MB" ] && add "- .claude/worktrees is ${mb} MB. Each agent worktree is a full checkout; merged ones are pruned at session start by prune-worktrees.sh, so anything left is unmerged and holding real work."
 fi
 

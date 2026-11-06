@@ -4,6 +4,16 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **`context-budget.sh` could time out the session-start hook.** `du -sm .claude/worktrees/` took
+  20 s over 31 GB of agent worktrees (2026-11-06), past `session-start.sh`'s 15 s timeout, so the
+  memory index never loaded. The check now reads the last measure from `.claude/.worktrees-mb`
+  and refreshes it in the background when it is older than 60 minutes; the hook ran in 0.0 s on
+  the same tree. The first session after install has no measure and says nothing. The cache is
+  in `templates/gitignore-snippet`; two new assertions pin the cold and cached runs.
+
 ## [0.1.1] — 2026-09-21
 
 ### Added

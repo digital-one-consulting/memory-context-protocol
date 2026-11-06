@@ -1,5 +1,6 @@
 # memory-context-protocol — local-only files (per developer, never shared)
 .claude/session-state.md
 .claude/hooks/.session-baseline
+.claude/.worktrees-mb
 .claude/settings.local.json
 .claude/worktrees/
