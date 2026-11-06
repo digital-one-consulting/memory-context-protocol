@@ -13,6 +13,12 @@ All notable changes to this project are recorded here. The format follows
   and refreshes it in the background when it is older than 60 minutes; the hook ran in 0.0 s on
   the same tree. The first session after install has no measure and says nothing. The cache is
   in `templates/gitignore-snippet`; two new assertions pin the cold and cached runs.
+- **`prune-worktrees.sh` kept merged worktrees when the local base branch was behind.** It
+  tested only the local `main`, which on one desk sat 80+ commits behind `origin/main` and was
+  never pulled; 21 merged agent worktrees (31 GB) built up by 2026-11-06. A branch now also
+  counts as merged when the base's remote-tracking ref (`MCP_BASE_REMOTE`, default `origin`)
+  contains it. The hook never fetches. A merged worktree whose only changes are deletions (a
+  half-finished removal) is now removed with `--force`; any other change still keeps it.
 
 ## [0.1.1] — 2026-09-21
 

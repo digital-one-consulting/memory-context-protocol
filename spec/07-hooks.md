@@ -44,11 +44,15 @@ gets disabled, and a disabled loop is no loop.
 ## 7.4 Worktree pruning — `prune-worktrees.sh`
 
 Removes agent worktrees under `.claude/worktrees/` whose branch is fully merged into the base
-branch (`MCP_BASE_BRANCH`, default `main`). It MUST skip a locked worktree (a running agent
-holds its own), MUST skip a worktree with uncommitted changes (a branch with no commits of its
-own counts as merged, and that is exactly what a finished agent leaves behind), MUST leave any
-unmerged branch alone, and removes without `--force` so git's own refusals stand. It prints
-what it did and exits 0.
+branch (`MCP_BASE_BRANCH`, default `main`) or into that branch's remote-tracking ref
+(`MCP_BASE_REMOTE`, default `origin`), when the ref exists. It MUST NOT fetch: it reads the ref
+the last fetch left. It MUST skip a locked worktree (a running agent holds its own), MUST skip a
+worktree with uncommitted changes (a branch with no commits of its own counts as merged, and that
+is exactly what a finished agent leaves behind), MUST leave any unmerged branch alone, and
+removes without `--force` so git's own refusals stand. The one exception: a merged worktree
+whose only changes are deletions of tracked files (a removal that stopped half-way) is removed
+with `--force`, because every deleted file is still in the merged commit. It prints what it did
+and exits 0.
 Each agent worktree is a full second checkout; four once held 1.7 GB inside one repository,
 and a linter walked into one and failed the main tree on another branch's code.
 

@@ -136,6 +136,34 @@ assert_no_dir "a clean worktree at the base tip is removed" "$R/.claude/worktree
 assert_dir "a worktree with an uncommitted file is kept — a branch with no commits of its own is what a finished agent leaves" "$R/.claude/worktrees/dirty"
 assert_file "the uncommitted file survived" "$R/.claude/worktrees/dirty/result.txt"
 
+# A local main far behind origin/main (never pulled): merged means "in origin/main" too, read from
+# the remote-tracking ref without a fetch. A deletion-only worktree on a merged branch goes too.
+O="$TMP/origin.git"; R="$TMP/behind"; rm -rf "$O" "$R"; mkdir -p "$R"
+( git init -q --bare -b main "$O" && cd "$R" && git init -q -b main && git config user.email t@example.com \
+  && git config user.name t && echo a > a && git add a && git commit -qm init \
+  && git remote add origin "$O" && git push -q origin main \
+  && for w in landed deleted touched untracked open; do
+       git branch "$w" && git worktree add -q ".claude/worktrees/$w" "$w" \
+       && ( cd ".claude/worktrees/$w" && echo "$w" > "$w" && git add "$w" && git commit -qm "$w" ) || exit 1
+     done \
+  && git checkout -q -b up && git merge -q --no-edit landed deleted touched untracked \
+  && git push -q origin up:main && git checkout -q main && git branch -q -D up \
+  && git fetch -q origin \
+  && rm .claude/worktrees/deleted/a && ( cd .claude/worktrees/deleted && git rm -q --cached deleted && rm deleted ) \
+  && rm .claude/worktrees/touched/a && echo edit > .claude/worktrees/touched/touched \
+  && rm .claude/worktrees/untracked/a && echo new > .claude/worktrees/untracked/new.txt \
+  && rm .claude/worktrees/open/a \
+  && git remote set-url origin "$TMP/gone.git" ) 2>/dev/null
+assert_eq "fixture: local main is behind origin/main" "$(git -C "$R" rev-list --count main..origin/main)" "5"
+out=$(cd "$R" && CLAUDE_PROJECT_DIR="$R" "$HOOKS/prune-worktrees.sh"); rc=$?
+assert_contains "prunes branches merged into origin/main, not the local main, with no fetch" "$out" "pruned 2 merged agent worktree(s)"
+assert_no_dir "a clean worktree merged only into origin/main is removed" "$R/.claude/worktrees/landed"
+assert_no_dir "a merged worktree with only deletions (staged and unstaged) is removed" "$R/.claude/worktrees/deleted"
+assert_dir "a deletion beside a modified file keeps the worktree" "$R/.claude/worktrees/touched"
+assert_dir "a deletion beside an untracked file keeps the worktree" "$R/.claude/worktrees/untracked"
+assert_dir "a deletion-only worktree whose branch is in neither main nor origin/main is kept" "$R/.claude/worktrees/open"
+assert_eq "exit 0" "$rc" "0"
+
 echo "stop-handoff.sh"
 S="$TMP/stop"; rm -rf "$S"; mkdir -p "$S/.claude/hooks"
 ( cd "$S" && git init -q -b main && git config user.email t@example.com && git config user.name t && echo a > a && git add a && git commit -qm init ) 2>/dev/null
