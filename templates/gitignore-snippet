@@ -4,3 +4,5 @@
 .claude/.worktrees-mb
 .claude/settings.local.json
 .claude/worktrees/
+.claude/.worktrees-state
+.claude/worktree-archive/

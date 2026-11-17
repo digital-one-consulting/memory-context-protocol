@@ -7,6 +7,21 @@ All notable changes to this project are recorded here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **`prune-worktrees.sh` judged every desk against `main`.** A desk that merges into
+  `dev/simulator` (and reaches `main` only by release PRs, days later) kept 48 merged agent
+  worktrees of 63, 21.5 GB in all (2026-11-17). The bases are now the desk's own: the main
+  checkout's branch and its upstream, the remote's `HEAD`, `main`/`master` and the integration
+  branches (`dev`, `dev/*`, `develop`), local and remote-tracking; `MCP_BASE_BRANCH` takes a list.
+  A branch also counts as merged when `git cherry` shows no `+` line, or when every file it
+  changed has the same content in the base (a squash merge). The untracked files of a
+  merged worktree (screenshots, reports) no longer keep it: they move to
+  `.claude/worktree-archive/<name>/` first. A worktree on a base branch is never touched. The
+  lock/live/young guards (a process's cwd, `MCP_PRUNE_MIN_AGE_MIN`) join the protocol, status is
+  read with `--no-optional-locks`, and removals stop after `MCP_PRUNE_BUDGET_S` (10 s). New
+  `--report` mode.
+- **`context-budget.sh` called merged worktrees "unmerged".** Its line now counts them by the
+  prune hook's rule, with sizes: "N merged (X MB) can be pruned now, H merged but held (Y MB),
+  U unmerged (Z MB)".
 - **`context-budget.sh` could time out the session-start hook.** `du -sm .claude/worktrees/` took
   20 s over 31 GB of agent worktrees (2026-11-06), past `session-start.sh`'s 15 s timeout, so the
   memory index never loaded. The check now reads the last measure from `.claude/.worktrees-mb`

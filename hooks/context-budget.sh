@@ -17,6 +17,7 @@
 # Budgets are environment-overridable so a test can prove the check fires
 # (see test/run.sh) without a sixty-megabyte fixture.
 set -u
+H="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"   # resolved before the cd: $0 may be relative
 cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || exit 0
 
 # num <value> <default>: an override that is not a whole number falls back to the default.
@@ -79,14 +80,39 @@ if [ -d .claude/worktrees ]; then
   # du over the worktrees took 20 s at 31 GB (2026-11-06) and pushed session-start.sh past its 15 s
   # hook timeout, so the project's memory did not load. The hook now reads the last measure and
   # starts the next one in the background; a stale number for one session is harmless.
+  # F3675 (2026-11-17): the line said "anything left is unmerged" while 48 of one desk's 63
+  # worktrees were merged (into its own base, not main). The measure now also sorts them, by the
+  # prune hook's own rule (prune-worktrees.sh --report), into prunable, held and unmerged, with sizes.
   cache=.claude/.worktrees-mb
+  state=.claude/.worktrees-state
   mb=0
   if [ -f "$cache" ]; then mb=$(tr -cd '0-9' < "$cache"); fi
   if [ -z "$(find "$cache" -mmin -60 2>/dev/null)" ]; then
-    # the trailing slash follows a symlinked worktrees directory instead of measuring the link
-    (du -sm .claude/worktrees/ 2>/dev/null | cut -f1 > "$cache.tmp" && mv "$cache.tmp" "$cache") </dev/null >/dev/null 2>&1 &
+    (
+      # the trailing slash follows a symlinked worktrees directory instead of measuring the link
+      du -sm .claude/worktrees/ 2>/dev/null | cut -f1 > "$cache.tmp" && mv "$cache.tmp" "$cache"
+      if [ -x "$H/prune-worktrees.sh" ]; then
+        sizes="$(du -sm .claude/worktrees/*/ 2>/dev/null)"
+        CLAUDE_PROJECT_DIR="$PWD" "$H/prune-worktrees.sh" --report 2>/dev/null \
+          | SIZES="$sizes" awk -F '\t' '
+              BEGIN { n = split(ENVIRON["SIZES"], l, "\n"); for (i = 1; i <= n; i++) { split(l[i], f, "\t"); p = f[2]; sub(/\/+$/, "", p); sub(/.*\//, "", p); mb[p] = f[1] } }
+              { c[$1]++; s[$1] += mb[$2] }
+              END { printf "prunable %d %d\nheld %d %d\nunmerged %d %d\n", c["prunable"], s["prunable"], c["held"], s["held"], c["unmerged"], s["unmerged"] }' \
+          > "$state.tmp" && mv "$state.tmp" "$state"
+      fi
+    ) </dev/null >/dev/null 2>&1 &
   fi
-  [ "${mb:-0}" -gt "$WORKTREE_MB" ] && add "- .claude/worktrees is ${mb} MB. Each agent worktree is a full checkout; merged ones are pruned at session start by prune-worktrees.sh, so anything left is unmerged and holding real work."
+  if [ "${mb:-0}" -gt "$WORKTREE_MB" ]; then
+    if [ -f "$state" ]; then
+      # "<class> <count> <MB>" per line
+      read -r _ pn pm _ hn hm _ un um <<EOF
+$(tr '\n' ' ' < "$state")
+EOF
+      add "- .claude/worktrees is ${mb} MB: ${pn:-0} merged (${pm:-0} MB) can be pruned now, ${hn:-0} merged but held (${hm:-0} MB), ${un:-0} unmerged (${um:-0} MB). Each agent worktree is a full checkout; prune-worktrees.sh removes the merged ones (locked, live or with tracked changes are held); the unmerged ones hold real work."
+    else
+      add "- .claude/worktrees is ${mb} MB. Each agent worktree is a full checkout; merged and unmerged are not counted yet (the next measure sorts them)."
+    fi
+  fi
 fi
 
 if [ -n "$warn" ]; then

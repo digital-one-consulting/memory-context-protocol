@@ -43,16 +43,28 @@ gets disabled, and a disabled loop is no loop.
 
 ## 7.4 Worktree pruning — `prune-worktrees.sh`
 
-Removes agent worktrees under `.claude/worktrees/` whose branch is fully merged into the base
-branch (`MCP_BASE_BRANCH`, default `main`) or into that branch's remote-tracking ref
-(`MCP_BASE_REMOTE`, default `origin`), when the ref exists. It MUST NOT fetch: it reads the ref
-the last fetch left. It MUST skip a locked worktree (a running agent holds its own), MUST skip a
-worktree with uncommitted changes (a branch with no commits of its own counts as merged, and that
-is exactly what a finished agent leaves behind), MUST leave any unmerged branch alone, and
-removes without `--force` so git's own refusals stand. The one exception: a merged worktree
-whose only changes are deletions of tracked files (a removal that stopped half-way) is removed
-with `--force`, because every deleted file is still in the merged commit. It prints what it did
-and exits 0.
+Removes agent worktrees under `.claude/worktrees/` whose branch a base branch contains. The bases
+are the desk's own, not only `main`: `MCP_BASE_BRANCH` (a space-separated list, when set), the
+branch the main checkout works on and its upstream, the remote's `HEAD`, `main` and `master`, and
+the remote's integration branches (`dev`, `dev/*`, `develop`), each local and as its
+remote-tracking ref (`MCP_BASE_REMOTE`, default `origin`). "Contains" is ancestry, or
+`git cherry` with no `+` line (every commit has an equal patch in the base), or, for a squash
+merge, every file the branch changed since it left the base has the same content in the base. It MUST NOT fetch:
+it reads the refs the last fetch left. It MUST skip a locked worktree (a running agent holds its
+own), one a process has its cwd in, and one touched in the last `MCP_PRUNE_MIN_AGE_MIN` minutes
+(default 360). It MUST skip a worktree with changes to tracked files (a branch with no commits of
+its own counts as merged, and that is exactly what a finished agent leaves behind), MUST never
+touch a worktree on a base branch itself, MUST leave any unmerged branch alone, and removes
+without `--force` so git's own refusals stand. Two exceptions: a merged worktree whose only
+changes are deletions of tracked files (a removal that stopped half-way) is removed with
+`--force`, because every deleted file is still in the merged commit; and the untracked files of
+a merged worktree are first moved to `.claude/worktree-archive/<name>/`, same paths inside,
+then the worktree goes. It reads status with `--no-optional-locks`, so it never refreshes an
+index (which would make every worktree look young). It starts no removal after
+`MCP_PRUNE_BUDGET_S` seconds (default 10). It prints what it did and exits 0.
+`prune-worktrees.sh --report` removes nothing and prints `<class>\t<name>` per worktree:
+`prunable`, `held` (merged, kept for now) or `unmerged`; `context-budget.sh` counts these, with
+sizes, in its background measure (`.claude/.worktrees-state`).
 Each agent worktree is a full second checkout; four once held 1.7 GB inside one repository,
 and a linter walked into one and failed the main tree on another branch's code.
 

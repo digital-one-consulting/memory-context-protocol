@@ -104,6 +104,7 @@ out=$(CLAUDE_PROJECT_DIR="$TMP/does-not-exist" "$HOOKS/context-budget.sh"); rc=$
 assert_eq "exits 0 when the project directory is missing (a hook must never take the session down)" "$rc" "0"
 
 echo "prune-worktrees.sh"
+export MCP_PRUNE_MIN_AGE_MIN=0   # every fixture is seconds old; the young guard has its own case below
 R="$TMP/repo"; rm -rf "$R"; mkdir -p "$R"
 ( cd "$R" && git init -q -b main && git config user.email t@example.com && git config user.name t \
   && echo a > a && git add a && git commit -qm init \
@@ -131,10 +132,10 @@ R="$TMP/re po"; rm -rf "$R"; mkdir -p "$R"   # a path with a space, and a worktr
   && git branch dirty && git worktree add -q .claude/worktrees/dirty dirty \
   && echo result > .claude/worktrees/dirty/result.txt ) 2>/dev/null
 out=$(cd "$R" && CLAUDE_PROJECT_DIR="$R" "$HOOKS/prune-worktrees.sh")
-assert_contains "prunes in a repository whose path contains a space" "$out" "pruned 1 merged agent worktree(s)"
+assert_contains "prunes in a repository whose path contains a space" "$out" "pruned 2 merged agent worktree(s); untracked files of 1 kept in .claude/worktree-archive/"
 assert_no_dir "a clean worktree at the base tip is removed" "$R/.claude/worktrees/clean"
-assert_dir "a worktree with an uncommitted file is kept — a branch with no commits of its own is what a finished agent leaves" "$R/.claude/worktrees/dirty"
-assert_file "the uncommitted file survived" "$R/.claude/worktrees/dirty/result.txt"
+assert_no_dir "a merged worktree with only an untracked file is removed" "$R/.claude/worktrees/dirty"
+assert_file "its untracked file moved to the archive, same path inside" "$R/.claude/worktree-archive/dirty/result.txt"
 
 # A local main far behind origin/main (never pulled): merged means "in origin/main" too, read from
 # the remote-tracking ref without a fetch. A deletion-only worktree on a merged branch goes too.
@@ -156,13 +157,61 @@ O="$TMP/origin.git"; R="$TMP/behind"; rm -rf "$O" "$R"; mkdir -p "$R"
   && git remote set-url origin "$TMP/gone.git" ) 2>/dev/null
 assert_eq "fixture: local main is behind origin/main" "$(git -C "$R" rev-list --count main..origin/main)" "5"
 out=$(cd "$R" && CLAUDE_PROJECT_DIR="$R" "$HOOKS/prune-worktrees.sh"); rc=$?
-assert_contains "prunes branches merged into origin/main, not the local main, with no fetch" "$out" "pruned 2 merged agent worktree(s)"
+assert_contains "prunes branches merged into origin/main, not the local main, with no fetch" "$out" "pruned 3 merged agent worktree(s)"
 assert_no_dir "a clean worktree merged only into origin/main is removed" "$R/.claude/worktrees/landed"
 assert_no_dir "a merged worktree with only deletions (staged and unstaged) is removed" "$R/.claude/worktrees/deleted"
 assert_dir "a deletion beside a modified file keeps the worktree" "$R/.claude/worktrees/touched"
-assert_dir "a deletion beside an untracked file keeps the worktree" "$R/.claude/worktrees/untracked"
+assert_no_dir "a deletion beside an untracked file goes, the untracked file archived" "$R/.claude/worktrees/untracked"
+assert_file "the untracked file is in the archive" "$R/.claude/worktree-archive/untracked/new.txt"
 assert_dir "a deletion-only worktree whose branch is in neither main nor origin/main is kept" "$R/.claude/worktrees/open"
 assert_eq "exit 0" "$rc" "0"
+
+# F3675: a desk that merges into dev/simulator, not main. The main checkout works on dev/simulator;
+# origin/main has none of it. Merged there (ancestry), merged by patch only (a cherry-pick: git
+# cherry has no "+"), unmerged, a merged one with a tracked edit, and a young one.
+O="$TMP/sim.git"; R="$TMP/sim"; rm -rf "$O" "$R"; mkdir -p "$R"
+( git init -q --bare -b main "$O" && cd "$R" && git init -q -b main && git config user.email t@example.com \
+  && git config user.name t && echo a > a && git add a && git commit -qm init \
+  && git remote add origin "$O" && git push -q origin main \
+  && git checkout -q -b dev/simulator \
+  && for w in landed picked squashed open edited young; do
+       git branch "$w" && git worktree add -q ".claude/worktrees/$w" "$w" \
+       && ( cd ".claude/worktrees/$w" && echo "$w" > "$w" && git add "$w" && git commit -qm "$w" ) || exit 1
+     done \
+  && git merge -q --no-edit landed edited young && git cherry-pick picked >/dev/null \
+  && ( cd .claude/worktrees/squashed && echo more >> squashed && git commit -qam squashed-2 ) \
+  && git merge -q --squash squashed >/dev/null && git commit -qm "squashed (#1)" \
+  && git push -q origin dev/simulator \
+  && echo edit > .claude/worktrees/edited/edited \
+  && mkdir -p .claude/worktrees/landed/output && echo shot > .claude/worktrees/landed/output/s.png ) 2>/dev/null
+touch -t 202001010000 "$R/.claude/worktrees/landed" "$R/.claude/worktrees/picked" "$R/.claude/worktrees/squashed" "$R/.claude/worktrees/edited"
+for f in HEAD index logs/HEAD gitdir; do
+  for w in landed picked squashed edited; do [ -e "$R/.git/worktrees/$w/$f" ] && touch -t 202001010000 "$R/.git/worktrees/$w/$f"; done
+done
+export MCP_PRUNE_MIN_AGE_MIN=60
+out=$(cd "$R" && CLAUDE_PROJECT_DIR="$R" "$HOOKS/prune-worktrees.sh" --report | sort | tr '\t\n' ': ')
+assert_eq "report: the desk's base, not main; a tracked edit and a young one are held" "$out" "held:edited held:young prunable:landed prunable:picked prunable:squashed unmerged:open "
+assert_dir "report removes nothing" "$R/.claude/worktrees/landed"
+out=$(cd "$R" && CLAUDE_PROJECT_DIR="$R" "$HOOKS/prune-worktrees.sh"); rc=$?
+assert_contains "prunes what dev/simulator contains, by ancestry, by patch and by content" "$out" "pruned 3 merged agent worktree(s)"
+assert_no_dir "squash-merged into dev/simulator (cherry says +, the content is there): removed" "$R/.claude/worktrees/squashed"
+assert_no_dir "merged into dev/simulator: removed" "$R/.claude/worktrees/landed"
+assert_no_dir "cherry-picked into dev/simulator (git cherry, no +): removed" "$R/.claude/worktrees/picked"
+assert_file "the untracked screenshot is archived" "$R/.claude/worktree-archive/landed/output/s.png"
+assert_dir "unmerged: kept" "$R/.claude/worktrees/open"
+assert_dir "merged with a tracked edit: kept" "$R/.claude/worktrees/edited"
+assert_dir "merged but young (touched within MCP_PRUNE_MIN_AGE_MIN): kept" "$R/.claude/worktrees/young"
+assert_eq "the base branch itself is never deleted" "$(git -C "$R" branch --list dev/simulator | tr -d ' *')" "dev/simulator"
+assert_eq "exit 0" "$rc" "0"
+# the budget line counts them by the same rule, with sizes
+P="$R"; mkdir -p "$P/memory"; printf '# Index\n' > "$P/memory/MEMORY.md"
+rm -f "$P/.claude/.worktrees-mb" "$P/.claude/.worktrees-state"
+( cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" MCP_WORKTREE_MB=0 "$HOOKS/context-budget.sh" >/dev/null )
+for _ in $(seq 1 100); do [ -s "$P/.claude/.worktrees-state" ] && break; sleep 0.1; done
+out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" MCP_WORKTREE_MB=0 "$HOOKS/context-budget.sh")
+assert_contains "the budget line counts merged and unmerged, with sizes" "$out" "0 merged (0 MB) can be pruned now, 2 merged but held ("
+assert_contains "the budget line counts the unmerged one" "$out" "1 unmerged ("
+unset MCP_PRUNE_MIN_AGE_MIN
 
 echo "stop-handoff.sh"
 S="$TMP/stop"; rm -rf "$S"; mkdir -p "$S/.claude/hooks"
