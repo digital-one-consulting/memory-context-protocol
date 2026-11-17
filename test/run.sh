@@ -211,6 +211,18 @@ for _ in $(seq 1 100); do [ -s "$P/.claude/.worktrees-state" ] && break; sleep 0
 out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" MCP_WORKTREE_MB=0 "$HOOKS/context-budget.sh")
 assert_contains "the budget line counts merged and unmerged, with sizes" "$out" "0 merged (0 MB) can be pruned now, 2 merged but held ("
 assert_contains "the budget line counts the unmerged one" "$out" "1 unmerged ("
+# the archive empties itself: a folder older than 30 days goes, a younger one stays, the line counts it
+mkdir -p "$R/.claude/worktree-archive/old/output" && echo old > "$R/.claude/worktree-archive/old/output/s.png"
+touch -t 202001010000 "$R/.claude/worktree-archive/old"
+out=$(cd "$R" && CLAUDE_PROJECT_DIR="$R" "$HOOKS/prune-worktrees.sh")
+assert_contains "the line counts the archived folders it deleted" "$out" "deleted 1 archived folder(s) older than 30 days from .claude/worktree-archive/"
+assert_no_dir "an archive folder older than 30 days: deleted" "$R/.claude/worktree-archive/old"
+assert_file "a younger archive folder: kept" "$R/.claude/worktree-archive/landed/output/s.png"
+rm -f "$P/.claude/.worktrees-mb" "$P/.claude/.worktrees-state"
+( cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" MCP_WORKTREE_MB=0 "$HOOKS/context-budget.sh" >/dev/null )
+for _ in $(seq 1 100); do [ -s "$P/.claude/.worktrees-state" ] && break; sleep 0.1; done
+out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" MCP_WORKTREE_MB=0 "$HOOKS/context-budget.sh")
+assert_contains "the budget line counts the archive" "$out" ".claude/worktree-archive holds 1 folder(s) ("
 unset MCP_PRUNE_MIN_AGE_MIN
 
 echo "stop-handoff.sh"

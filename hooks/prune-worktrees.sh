@@ -33,6 +33,9 @@
 #     desk's 63 worktrees held only screenshots and reports an agent left in output/ and docs/,
 #     so none of them ever went. They now move to .claude/worktree-archive/<name>/ (same paths
 #     inside), then the worktree goes. Ignored files (node_modules) go with the worktree;
+#   - the archive empties itself (F3678): a .claude/worktree-archive/<name> folder older than
+#     MCP_ARCHIVE_KEEP_DAYS days (default 30, by its own mtime: the day it was filled) is deleted;
+#     a younger one stays. The count is in the line it prints;
 #   - the BASE is the desk's, not "main" (F3675). The same desk merges into dev/simulator and
 #     reaches main only by release PRs days later: 48 merged worktrees, 16 GB, were kept because
 #     none was in main. A branch is merged when any of these contains it: MCP_BASE_BRANCH (a
@@ -69,6 +72,8 @@ REMOTE="${MCP_BASE_REMOTE:-origin}"
 
 MIN_AGE="${MCP_PRUNE_MIN_AGE_MIN:-360}"
 case "$MIN_AGE" in ''|*[!0-9]*) MIN_AGE=360 ;; esac
+KEEP_DAYS="${MCP_ARCHIVE_KEEP_DAYS:-30}"
+case "$KEEP_DAYS" in ''|*[!0-9]*) KEEP_DAYS=30 ;; esac
 BUDGET="${MCP_PRUNE_BUDGET_S:-10}"
 case "$BUDGET" in ''|*[!0-9]*) BUDGET=10 ;; esac
 # Every process's cwd, read once (lsof takes ~0.1 s here); empty when lsof is missing.
@@ -209,11 +214,24 @@ EOF
 
 [ "$REPORT" = 1 ] && exit 0
 git worktree prune >/dev/null 2>&1
-if [ "$removed" -gt 0 ]; then
-  if [ "$archived" -gt 0 ]; then
-    echo "pruned $removed merged agent worktree(s); untracked files of $archived kept in $ARCHIVE_DIR/"
-  else
-    echo "pruned $removed merged agent worktree(s)"
-  fi
+
+# F3678: the archive is emptied by age, its direct folders only (rm -rf removes a symlink inside
+# as a link, never its target). MCP_ARCHIVE_KEEP_DAYS=0 keeps them all.
+expired=0
+if [ "$KEEP_DAYS" -gt 0 ] && [ -d "$MAIN_PATH/$ARCHIVE_DIR" ]; then
+  while IFS= read -r -d '' old; do
+    rm -rf -- "$old" 2>/dev/null && expired=$((expired + 1))
+  done < <(find "$MAIN_PATH/$ARCHIVE_DIR/" -mindepth 1 -maxdepth 1 -type d -mmin "+$((KEEP_DAYS * 1440))" -print0 2>/dev/null)
 fi
+
+line=""
+if [ "$removed" -gt 0 ]; then
+  line="pruned $removed merged agent worktree(s)"
+  [ "$archived" -gt 0 ] && line="$line; untracked files of $archived kept in $ARCHIVE_DIR/"
+fi
+if [ "$expired" -gt 0 ]; then
+  [ -n "$line" ] && line="$line; "
+  line="${line}deleted $expired archived folder(s) older than $KEEP_DAYS days from $ARCHIVE_DIR/"
+fi
+[ -n "$line" ] && echo "$line"
 exit 0

@@ -7,6 +7,10 @@ All notable changes to this project are recorded here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **`.claude/worktree-archive/` was never emptied.** `prune-worktrees.sh` now deletes an archive
+  folder older than `MCP_ARCHIVE_KEEP_DAYS` days (default 30, by the folder's mtime; `0` keeps
+  all) and keeps younger ones; its line counts them ("deleted N archived folder(s) older than
+  30 days"). The `context-budget.sh` worktree line counts the archive too, with its size.
 - **`prune-worktrees.sh` judged every desk against `main`.** A desk that merges into
   `dev/simulator` (and reaches `main` only by release PRs, days later) kept 48 merged agent
   worktrees of 63, 21.5 GB in all (2026-11-17). The bases are now the desk's own: the main

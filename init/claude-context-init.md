@@ -388,17 +388,26 @@ if [ -d .claude/worktrees ]; then
               BEGIN { n = split(ENVIRON["SIZES"], l, "\n"); for (i = 1; i <= n; i++) { split(l[i], f, "\t"); p = f[2]; sub(/\/+$/, "", p); sub(/.*\//, "", p); mb[p] = f[1] } }
               { c[$1]++; s[$1] += mb[$2] }
               END { printf "prunable %d %d\nheld %d %d\nunmerged %d %d\n", c["prunable"], s["prunable"], c["held"], s["held"], c["unmerged"], s["unmerged"] }' \
-          > "$state.tmp" && mv "$state.tmp" "$state"
+          > "$state.tmp"
+        # F3678: the archive the prune hook fills (and empties after 30 days), counted the same way
+        an=0; am=0
+        if [ -d .claude/worktree-archive ]; then
+          an=$(find .claude/worktree-archive/ -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -cd '0-9')
+          am=$(du -sm .claude/worktree-archive/ 2>/dev/null | cut -f1)
+        fi
+        printf 'archive %d %d\n' "${an:-0}" "${am:-0}" >> "$state.tmp" && mv "$state.tmp" "$state"
       fi
     ) </dev/null >/dev/null 2>&1 &
   fi
   if [ "${mb:-0}" -gt "$WORKTREE_MB" ]; then
     if [ -f "$state" ]; then
       # "<class> <count> <MB>" per line
-      read -r _ pn pm _ hn hm _ un um <<EOF
+      read -r _ pn pm _ hn hm _ un um _ an am <<EOF
 $(tr '\n' ' ' < "$state")
 EOF
-      add "- .claude/worktrees is ${mb} MB: ${pn:-0} merged (${pm:-0} MB) can be pruned now, ${hn:-0} merged but held (${hm:-0} MB), ${un:-0} unmerged (${um:-0} MB). Each agent worktree is a full checkout; prune-worktrees.sh removes the merged ones (locked, live or with tracked changes are held); the unmerged ones hold real work."
+      arch=""
+      [ "${an:-0}" -gt 0 ] 2>/dev/null && arch=" .claude/worktree-archive holds ${an} folder(s) (${am:-0} MB) of untracked files from pruned worktrees; prune-worktrees.sh deletes those older than 30 days."
+      add "- .claude/worktrees is ${mb} MB: ${pn:-0} merged (${pm:-0} MB) can be pruned now, ${hn:-0} merged but held (${hm:-0} MB), ${un:-0} unmerged (${um:-0} MB). Each agent worktree is a full checkout; prune-worktrees.sh removes the merged ones (locked, live or with tracked changes are held); the unmerged ones hold real work.${arch}"
     else
       add "- .claude/worktrees is ${mb} MB. Each agent worktree is a full checkout; merged and unmerged are not counted yet (the next measure sorts them)."
     fi
@@ -449,6 +458,9 @@ Create `.claude/hooks/prune-worktrees.sh` (chmod +x):
 #     desk's 63 worktrees held only screenshots and reports an agent left in output/ and docs/,
 #     so none of them ever went. They now move to .claude/worktree-archive/<name>/ (same paths
 #     inside), then the worktree goes. Ignored files (node_modules) go with the worktree;
+#   - the archive empties itself (F3678): a .claude/worktree-archive/<name> folder older than
+#     MCP_ARCHIVE_KEEP_DAYS days (default 30, by its own mtime: the day it was filled) is deleted;
+#     a younger one stays. The count is in the line it prints;
 #   - the BASE is the desk's, not "main" (F3675). The same desk merges into dev/simulator and
 #     reaches main only by release PRs days later: 48 merged worktrees, 16 GB, were kept because
 #     none was in main. A branch is merged when any of these contains it: MCP_BASE_BRANCH (a
@@ -485,6 +497,8 @@ REMOTE="${MCP_BASE_REMOTE:-origin}"
 
 MIN_AGE="${MCP_PRUNE_MIN_AGE_MIN:-360}"
 case "$MIN_AGE" in ''|*[!0-9]*) MIN_AGE=360 ;; esac
+KEEP_DAYS="${MCP_ARCHIVE_KEEP_DAYS:-30}"
+case "$KEEP_DAYS" in ''|*[!0-9]*) KEEP_DAYS=30 ;; esac
 BUDGET="${MCP_PRUNE_BUDGET_S:-10}"
 case "$BUDGET" in ''|*[!0-9]*) BUDGET=10 ;; esac
 # Every process's cwd, read once (lsof takes ~0.1 s here); empty when lsof is missing.
@@ -625,13 +639,26 @@ EOF
 
 [ "$REPORT" = 1 ] && exit 0
 git worktree prune >/dev/null 2>&1
-if [ "$removed" -gt 0 ]; then
-  if [ "$archived" -gt 0 ]; then
-    echo "pruned $removed merged agent worktree(s); untracked files of $archived kept in $ARCHIVE_DIR/"
-  else
-    echo "pruned $removed merged agent worktree(s)"
-  fi
+
+# F3678: the archive is emptied by age, its direct folders only (rm -rf removes a symlink inside
+# as a link, never its target). MCP_ARCHIVE_KEEP_DAYS=0 keeps them all.
+expired=0
+if [ "$KEEP_DAYS" -gt 0 ] && [ -d "$MAIN_PATH/$ARCHIVE_DIR" ]; then
+  while IFS= read -r -d '' old; do
+    rm -rf -- "$old" 2>/dev/null && expired=$((expired + 1))
+  done < <(find "$MAIN_PATH/$ARCHIVE_DIR/" -mindepth 1 -maxdepth 1 -type d -mmin "+$((KEEP_DAYS * 1440))" -print0 2>/dev/null)
 fi
+
+line=""
+if [ "$removed" -gt 0 ]; then
+  line="pruned $removed merged agent worktree(s)"
+  [ "$archived" -gt 0 ] && line="$line; untracked files of $archived kept in $ARCHIVE_DIR/"
+fi
+if [ "$expired" -gt 0 ]; then
+  [ -n "$line" ] && line="$line; "
+  line="${line}deleted $expired archived folder(s) older than $KEEP_DAYS days from $ARCHIVE_DIR/"
+fi
+[ -n "$line" ] && echo "$line"
 exit 0
 ```
 

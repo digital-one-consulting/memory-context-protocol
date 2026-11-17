@@ -98,17 +98,26 @@ if [ -d .claude/worktrees ]; then
               BEGIN { n = split(ENVIRON["SIZES"], l, "\n"); for (i = 1; i <= n; i++) { split(l[i], f, "\t"); p = f[2]; sub(/\/+$/, "", p); sub(/.*\//, "", p); mb[p] = f[1] } }
               { c[$1]++; s[$1] += mb[$2] }
               END { printf "prunable %d %d\nheld %d %d\nunmerged %d %d\n", c["prunable"], s["prunable"], c["held"], s["held"], c["unmerged"], s["unmerged"] }' \
-          > "$state.tmp" && mv "$state.tmp" "$state"
+          > "$state.tmp"
+        # F3678: the archive the prune hook fills (and empties after 30 days), counted the same way
+        an=0; am=0
+        if [ -d .claude/worktree-archive ]; then
+          an=$(find .claude/worktree-archive/ -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -cd '0-9')
+          am=$(du -sm .claude/worktree-archive/ 2>/dev/null | cut -f1)
+        fi
+        printf 'archive %d %d\n' "${an:-0}" "${am:-0}" >> "$state.tmp" && mv "$state.tmp" "$state"
       fi
     ) </dev/null >/dev/null 2>&1 &
   fi
   if [ "${mb:-0}" -gt "$WORKTREE_MB" ]; then
     if [ -f "$state" ]; then
       # "<class> <count> <MB>" per line
-      read -r _ pn pm _ hn hm _ un um <<EOF
+      read -r _ pn pm _ hn hm _ un um _ an am <<EOF
 $(tr '\n' ' ' < "$state")
 EOF
-      add "- .claude/worktrees is ${mb} MB: ${pn:-0} merged (${pm:-0} MB) can be pruned now, ${hn:-0} merged but held (${hm:-0} MB), ${un:-0} unmerged (${um:-0} MB). Each agent worktree is a full checkout; prune-worktrees.sh removes the merged ones (locked, live or with tracked changes are held); the unmerged ones hold real work."
+      arch=""
+      [ "${an:-0}" -gt 0 ] 2>/dev/null && arch=" .claude/worktree-archive holds ${an} folder(s) (${am:-0} MB) of untracked files from pruned worktrees; prune-worktrees.sh deletes those older than 30 days."
+      add "- .claude/worktrees is ${mb} MB: ${pn:-0} merged (${pm:-0} MB) can be pruned now, ${hn:-0} merged but held (${hm:-0} MB), ${un:-0} unmerged (${um:-0} MB). Each agent worktree is a full checkout; prune-worktrees.sh removes the merged ones (locked, live or with tracked changes are held); the unmerged ones hold real work.${arch}"
     else
       add "- .claude/worktrees is ${mb} MB. Each agent worktree is a full checkout; merged and unmerged are not counted yet (the next measure sorts them)."
     fi
