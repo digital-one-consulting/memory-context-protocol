@@ -7,6 +7,12 @@ All notable changes to this project are recorded here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- **The session-start hook timed out on a desk with many worktrees, and nothing loaded.**
+  `session-start.sh` ran `prune-worktrees.sh` and waited for it. On a desk with 33 agent
+  worktrees and six bases, judging one unmerged branch took about 18 s and the prune minutes;
+  the harness kills the hook at 15 s, so every start from 2026-11-18 loaded no budget, index or
+  handoff. The prune now runs detached, one at a time (lock folder `.claude/hooks/.prune-running`,
+  `MCP_PRUNE_LOCK`, taken for stale after 30 minutes).
 - **`.claude/worktree-archive/` was never emptied.** `prune-worktrees.sh` now deletes an archive
   folder older than `MCP_ARCHIVE_KEEP_DAYS` days (default 30, by the folder's mtime; `0` keeps
   all) and keeps younger ones; its line counts them ("deleted N archived folder(s) older than

@@ -4,7 +4,8 @@
 # it costs no tool call and no turn.
 #
 # In order:
-#   1. prune merged agent worktrees (scratch that would otherwise accumulate);
+#   1. start a prune of merged agent worktrees, in the background (scratch that
+#      would otherwise accumulate);
 #   2. weigh the context budgets — silent when they hold;
 #   3. snapshot repository state, so the Stop hook can tell later whether real
 #      work happened;
@@ -49,7 +50,20 @@ hashcmd() {
   else cksum; fi
 }
 
-[ -x "$H/prune-worktrees.sh" ] && "$H/prune-worktrees.sh" >/dev/null 2>&1
+# The prune runs DETACHED: this hook never waits for it. Measured 2026-11-22 on a desk with 33
+# agent worktrees and six base branches: judging each unmerged branch (git cherry and a content
+# diff against every base) took about 18 s, the whole prune minutes. The harness gives this hook
+# 15 s, so from 11-18 every session start there timed out with no output and nothing loaded:
+# no budget, no index, no handoff. One prune at a time: a lock folder, taken for stale after
+# 30 minutes, so four session starts in ten minutes do not start four prunes.
+PRUNE_LOCK="${MCP_PRUNE_LOCK:-.claude/hooks/.prune-running}"
+if [ -x "$H/prune-worktrees.sh" ]; then
+  [ -d "$PRUNE_LOCK" ] && [ -n "$(find "$PRUNE_LOCK" -maxdepth 0 -mmin +30 2>/dev/null)" ] \
+    && rmdir "$PRUNE_LOCK" 2>/dev/null
+  if mkdir -p "$(dirname "$PRUNE_LOCK")" 2>/dev/null && mkdir "$PRUNE_LOCK" 2>/dev/null; then
+    ( "$H/prune-worktrees.sh" >/dev/null 2>&1; rmdir "$PRUNE_LOCK" 2>/dev/null ) </dev/null >/dev/null 2>&1 &
+  fi
+fi
 BUDGET="$([ -x "$H/context-budget.sh" ] && "$H/context-budget.sh" 2>/dev/null)"
 
 # Snapshot repository state for the Stop hook. Per-machine and gitignored —

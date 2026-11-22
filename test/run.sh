@@ -268,6 +268,20 @@ assert_contains "tells the agent to say it in one line" "$out" "in one line befo
 mkfile "$TMP/live-from-stdin.jsonl" $((2 * 1024 * 1024))
 out=$(cd "$P" && printf '{"session_id":"x","transcript_path":"%s","cwd":"%s","hook_event_name":"SessionStart","source":"resume"}' "$TMP/live-from-stdin.jsonl" "$P" | CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" MCP_TRANSCRIPT_MB=1 "$HOOKS/session-start.sh")
 assert_contains "reads transcript_path from the harness's stdin and measures that file" "$out" "live transcript is 2 MB"
+# 2026-11-22: a desk's prune took minutes and the harness kills this hook at 15 s, so nothing
+# loaded at all. The prune is detached and single: a 20 s prune neither holds the hook nor runs twice.
+SH="$TMP/slow-hooks"; mkdir -p "$SH"; cp "$HOOKS/session-start.sh" "$SH/"
+printf '#!/usr/bin/env bash\necho run >> "%s"\nsleep 20\n' "$TMP/slow-runs" > "$SH/prune-worktrees.sh"; chmod +x "$SH/prune-worktrees.sh"
+t0=$(date +%s)
+out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" "$SH/session-start.sh" </dev/null)
+out2=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" "$SH/session-start.sh" </dev/null)
+took=$(( $(date +%s) - t0 ))
+if [ "$took" -lt 10 ]; then ok "a slow prune does not hold the hook (two starts in ${took} s)"; else bad "a slow prune does not hold the hook" "two starts took ${took} s"; fi
+assert_contains "the index still loads beside a slow prune" "$out2" "- line 1"
+sleep 1
+assert_eq "one prune at a time (the lock folder)" "$(wc -l < "$TMP/slow-runs" | tr -d ' ')" "1"
+assert_dir "the lock is held while the prune runs" "$P/.claude/hooks/.prune-running"
+pkill -f "$SH/prune-worktrees.sh" 2>/dev/null; rmdir "$P/.claude/hooks/.prune-running" 2>/dev/null
 
 echo "init/claude-context-init.md"
 # The init prompt carries the four hooks inline so it can be pasted standalone. A copy drifts;
