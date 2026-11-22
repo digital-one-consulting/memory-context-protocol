@@ -6,3 +6,4 @@
 .claude/worktrees/
 .claude/.worktrees-state
 .claude/worktree-archive/
+.claude/.auto-trim

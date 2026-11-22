@@ -79,6 +79,27 @@ assert_file "the background measure writes its cache" "$P/.claude/.worktrees-mb"
 out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" MCP_WORKTREE_MB=1 "$HOOKS/context-budget.sh")
 assert_contains "fires on oversized agent worktrees" "$out" ".claude/worktrees is 2 MB"
 
+# An engine's own record (.claude/.auto-trim): the line says what it pruned or compacted, and when,
+# instead of asking for a prune or a /clear. Without a fresh record the old advice stands.
+P=$(fresh_project auto-trim)
+mkdir -p "$P/.claude/worktrees"; echo 500 > "$P/.claude/.worktrees-mb"
+printf 'prunable 1 20\nheld 2 300\nunmerged 3 180\narchive 0 0\n' > "$P/.claude/.worktrees-state"
+now=$(date +%s)
+printf '%s\tprune\t-\tpruned 3 merged agent worktree(s)\n%s\tprune\t-\tnothing to remove\n' $((now - 1800)) $((now - 60)) > "$P/.claude/.auto-trim"
+out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" "$HOOKS/context-budget.sh")
+assert_contains "says the engine pruned by itself, and what" "$out" "The engine prunes it by itself (last run"
+assert_contains "names the last removal" "$out" ": pruned 3 merged agent worktree(s) at "
+assert_contains "asks nothing of the owner" "$out" "Nothing to do"
+printf '%s\tprune\t-\tnothing to remove\n' $((now - 20000)) > "$P/.claude/.auto-trim"
+out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" "$HOOKS/context-budget.sh")
+assert_contains "a stale record (no run for 3 h) keeps the prune advice" "$out" "can be pruned now"
+mkfile "$TMP/sess-a.jsonl" $((2 * 1024 * 1024)); cp "$TMP/sess-a.jsonl" "$TMP/sess-b.jsonl"
+printf '%s\tcompact\tsess-a\t156k → 2k tokens in 13 s, auto\n' "$now" >> "$P/.claude/.auto-trim"
+out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_TRANSCRIPT_PATH="$TMP/sess-a.jsonl" MCP_TRANSCRIPT_MB=1 "$HOOKS/context-budget.sh")
+assert_contains "says the engine compacted this session by itself" "$out" "the engine compacted this session by itself at "
+out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_TRANSCRIPT_PATH="$TMP/sess-b.jsonl" MCP_TRANSCRIPT_MB=1 "$HOOKS/context-budget.sh")
+assert_contains "another session's compaction does not count: /clear is still asked" "$out" "/handoff, then /clear"
+
 P="$TMP/enc test.dir_x"; rm -rf "$P"; mkdir -p "$P/memory"   # a dot, an underscore, a space
 printf '# Index\n' > "$P/memory/MEMORY.md"
 enc="$(cd "$P" && pwd -P | sed 's#[^A-Za-z0-9]#-#g')"

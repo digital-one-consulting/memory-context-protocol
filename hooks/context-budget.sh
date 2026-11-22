@@ -35,6 +35,28 @@ PROJECTS_DIR="${MCP_PROJECTS_DIR:-$HOME/.claude/projects}"
 warn=""
 add() { warn="${warn}$1"$'\n'; }
 
+# What an engine that runs this project's sessions did by itself (F3736, 2026-11-22). Builds
+# prunes merged worktrees at idle and every hour, and compacts a session whose context passed its
+# window, then writes one line per action here:
+#   <epoch seconds> TAB prune|compact TAB <session id, or -> TAB <what it did>
+# The owner asked why the line still told him to prune and /clear when Builds already did both.
+# With no record (no engine, or an engine that does not write one) the old advice stands.
+TRIM="${MCP_AUTO_TRIM:-.claude/.auto-trim}"
+TRIM_FRESH_S=$(num "${MCP_TRIM_FRESH_S:-}" 10800)  # three hourly runs missed: the engine has stopped
+now_s=$(date +%s)
+# at <epoch>: "21:04" today, "11-21 21:04" before (BSD date -r, else GNU date -d @)
+at() {
+  local d fmt
+  d=$(date -r "$1" +%F 2>/dev/null || date -d "@$1" +%F 2>/dev/null) || return 0
+  if [ "$d" = "$(date +%F)" ]; then fmt=%H:%M; else fmt='%m-%d %H:%M'; fi
+  date -r "$1" "+$fmt" 2>/dev/null || date -d "@$1" "+$fmt" 2>/dev/null
+}
+# trim_last <awk condition>: the last record that meets it, "<epoch> TAB <kind> TAB <session> TAB <text>"
+trim_last() {
+  [ -f "$TRIM" ] || return 0
+  awk -F '\t' "\$1 ~ /^[0-9]+\$/ && ($1)" "$TRIM" 2>/dev/null | tail -1
+}
+
 if [ -f "$MEMORY_INDEX" ]; then
   # wc -l counts newline characters: an index whose last line has no newline counts one fewer.
   n=$(wc -l < "$MEMORY_INDEX" | tr -d ' ')
@@ -71,7 +93,17 @@ else
 fi
 if [ -n "$live" ]; then
   mb=$(du -sm "$live" 2>/dev/null | cut -f1)
-  if [ "${mb:-0}" -gt "$TRANSCRIPT_MB" ]; then
+  # The transcript's name is its session id; a compaction the engine recorded for that session
+  # means the context sent with each request is the summary and the turns since, not the file.
+  sid=$(basename "$live" .jsonl)
+  comp=""
+  [ "${mb:-0}" -gt "$TRANSCRIPT_MB" ] && comp=$(SID="$sid" trim_last '$2 == "compact" && $3 == ENVIRON["SID"]')
+  if [ -n "$comp" ]; then
+    IFS=$'\t' read -r ct _ _ cw <<EOF
+$comp
+EOF
+    add "- This project's live transcript is ${mb} MB on disk, but the engine compacted this session by itself at $(at "$ct")${cw:+ (${cw})}: each request now carries that summary and the turns since, not the whole file. Nothing to do."
+  elif [ "${mb:-0}" -gt "$TRANSCRIPT_MB" ]; then
     add "- This project's live transcript is ${mb} MB. A session this long sits at its context ceiling, so every question is paying the ceiling regardless of size. **Finish with /handoff, then /clear.** The memory files are the continuity, not the transcript."
   fi
 fi
@@ -109,7 +141,34 @@ if [ -d .claude/worktrees ]; then
       fi
     ) </dev/null >/dev/null 2>&1 &
   fi
+  # The engine's own prune: its last run, and its last run that removed something.
+  ran=""; did=""
   if [ "${mb:-0}" -gt "$WORKTREE_MB" ]; then
+    ran=$(trim_last '$2 == "prune"')
+    did=$(trim_last '$2 == "prune" && $4 != "nothing to remove"')
+    rt=${ran%%$'\t'*}
+    [ -n "$ran" ] && [ $((now_s - rt)) -gt "$TRIM_FRESH_S" ] && ran=""
+  fi
+  if [ "${mb:-0}" -gt "$WORKTREE_MB" ] && [ -n "$ran" ]; then
+    eng="The engine prunes it by itself (last run $(at "$rt"))"
+    if [ -n "$did" ]; then
+      IFS=$'\t' read -r dt _ _ dw <<EOF
+$did
+EOF
+      eng="${eng}: ${dw} at $(at "$dt")"
+    else
+      eng="${eng}: nothing to remove yet"
+    fi
+    left=""
+    if [ -f "$state" ]; then
+      read -r _ pn pm _ hn hm _ un um _ an am <<EOF
+$(tr '\n' ' ' < "$state")
+EOF
+      left=" Left: ${pn:-0} merged (${pm:-0} MB) for its next run, ${hn:-0} merged but held (${hm:-0} MB), ${un:-0} unmerged (${um:-0} MB)."
+      [ "${an:-0}" -gt 0 ] 2>/dev/null && left="${left} .claude/worktree-archive holds ${an} folder(s) (${am:-0} MB) of untracked files from pruned worktrees; prune-worktrees.sh deletes those older than 30 days."
+    fi
+    add "- .claude/worktrees is ${mb} MB. ${eng}.${left} Nothing to do: a held worktree has a live agent, a lock or a change, and an unmerged one holds real work."
+  elif [ "${mb:-0}" -gt "$WORKTREE_MB" ]; then
     if [ -f "$state" ]; then
       # "<class> <count> <MB>" per line
       read -r _ pn pm _ hn hm _ un um _ an am <<EOF

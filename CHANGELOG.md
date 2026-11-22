@@ -6,6 +6,15 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **`context-budget.sh` says what an engine did by itself.** An engine that runs the project's
+  sessions (Builds) may write `.claude/.auto-trim`, one line per action:
+  `<epoch seconds> TAB prune|compact TAB <session id or -> TAB <what it did>`. With a prune record
+  newer than `MCP_TRIM_FRESH_S` (default 3 h), the worktree line says what the engine pruned and
+  when, and asks nothing. With a compaction recorded for the live transcript's session, the
+  transcript line says when it compacted, and asks for no `/clear`. Without a record the advice
+  is as before. `.claude/.auto-trim` is in the ignore snippet.
+
 ### Fixed
 - **The session-start hook timed out on a desk with many worktrees, and nothing loaded.**
   `session-start.sh` ran `prune-worktrees.sh` and waited for it. On a desk with 33 agent
