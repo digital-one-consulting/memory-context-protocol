@@ -159,15 +159,15 @@ EOF
     else
       eng="${eng}: nothing to remove yet"
     fi
-    left=""
+    left=""; arch=""
     if [ -f "$state" ]; then
       read -r _ pn pm _ hn hm _ un um _ an am <<EOF
 $(tr '\n' ' ' < "$state")
 EOF
       left=" Left: ${pn:-0} merged (${pm:-0} MB) for its next run, ${hn:-0} merged but held (${hm:-0} MB), ${un:-0} unmerged (${um:-0} MB)."
-      [ "${an:-0}" -gt 0 ] 2>/dev/null && left="${left} .claude/worktree-archive holds ${an} folder(s) (${am:-0} MB) of untracked files from pruned worktrees; prune-worktrees.sh deletes those older than 30 days."
+      [ "${an:-0}" -gt 0 ] 2>/dev/null && arch=" .claude/worktree-archive holds ${an} folder(s) (${am:-0} MB) of untracked files from pruned worktrees; prune-worktrees.sh deletes those older than 30 days."
     fi
-    add "- .claude/worktrees is ${mb} MB. ${eng}.${left} Nothing to do: a held worktree has a live agent, a lock or a change, and an unmerged one holds real work."
+    add "- .claude/worktrees is ${mb} MB. ${eng}.${left} Nothing to do: a held worktree has a live agent, a lock or a change, and an unmerged one holds real work.${arch}"
   elif [ "${mb:-0}" -gt "$WORKTREE_MB" ]; then
     if [ -f "$state" ]; then
       # "<class> <count> <MB>" per line
