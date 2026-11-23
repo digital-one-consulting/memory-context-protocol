@@ -7,6 +7,21 @@ All notable changes to this project are recorded here. The format follows
 ## [Unreleased]
 
 ### Added
+- **`prune-worktrees.sh` no longer lets dirt hold space for ever.** A desk held 5.8 GB in merged
+  worktrees. Now:
+  - A merged worktree whose only changes are generated files (`dist/**`, `output/**`,
+    `test/report.json`, `**/*.log`, `TODO.md`, `todo/*.md`) is removed. A project adds globs in
+    `.builds/worktree-ignore` (path: `MCP_WORKTREE_IGNORE`).
+  - A merged worktree whose real changes are older than `MCP_PRUNE_DIRTY_AGE_H` (default 24 h)
+    has its changes, untracked files included, saved as `.claude/worktree-archive/<name>.patch`
+    first. The hook checks that the patch applies in reverse, then removes the worktree.
+  - An unmerged worktree with no live agent and no commit for `MCP_PRUNE_IDLE_DAYS` (default 7)
+    gets a patch the same way, then its folder is removed. Its branch stays.
+  - A lock whose pid lives always holds the worktree. A lock with a dead pid does not.
+  - `--report` lines are `class TAB name TAB MB TAB why`: the worktree's own du, and why it stays
+    or goes (live agent, lock, the changed files and their age). `context-budget.sh` sums those
+    sizes. It reads `.claude/worktrees/.prune-report` first (an engine's last report, under 3 h
+    old), and it counts the patches in the archive.
 - **`context-budget.sh` says what an engine did by itself.** An engine that runs the project's
   sessions (Builds) may write `.claude/.auto-trim`, one line per action:
   `<epoch seconds> TAB prune|compact TAB <session id or -> TAB <what it did>`. With a prune record
