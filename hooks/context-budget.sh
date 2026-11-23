@@ -123,21 +123,37 @@ if [ -d .claude/worktrees ]; then
     (
       # the trailing slash follows a symlinked worktrees directory instead of measuring the link
       du -sm .claude/worktrees/ 2>/dev/null | cut -f1 > "$cache.tmp" && mv "$cache.tmp" "$cache"
-      if [ -x "$H/prune-worktrees.sh" ]; then
-        sizes="$(du -sm .claude/worktrees/*/ 2>/dev/null)"
-        CLAUDE_PROJECT_DIR="$PWD" "$H/prune-worktrees.sh" --report 2>/dev/null \
+      # WP4 (2026-11-23): one desk's line said "9 merged (50 MB)" for 5.8 GB, and "0 held" while its
+      # status listed 19 held: the sizes came from a separate du joined by name, and the sort from the
+      # desk's own copy of the prune hook, not the one the engine runs. The engine's last report
+      # (.claude/worktrees/.prune-report, under 3 h old) is read first; each line carries the hook's own
+      # du of that worktree. An older hook's two-field lines still get a du per folder.
+      report=""
+      if [ -n "$(find .claude/worktrees/.prune-report -mmin -180 2>/dev/null)" ]; then
+        report="$(cat .claude/worktrees/.prune-report 2>/dev/null)"
+      elif [ -x "$H/prune-worktrees.sh" ]; then
+        report="$(CLAUDE_PROJECT_DIR="$PWD" "$H/prune-worktrees.sh" --report 2>/dev/null)"
+      fi
+      if [ -n "$report" ] || [ -x "$H/prune-worktrees.sh" ]; then
+        sizes=""
+        printf '%s\n' "$report" | awk -F '\t' 'NF && $3 !~ /^[0-9]+$/ { f = 1 } END { exit !f }' \
+          && sizes="$(for d in .claude/worktrees/*/; do du -sm "$d" 2>/dev/null; done)"
+        printf '%s\n' "$report" \
           | SIZES="$sizes" awk -F '\t' '
               BEGIN { n = split(ENVIRON["SIZES"], l, "\n"); for (i = 1; i <= n; i++) { split(l[i], f, "\t"); p = f[2]; sub(/\/+$/, "", p); sub(/.*\//, "", p); mb[p] = f[1] } }
-              { c[$1]++; s[$1] += mb[$2] }
+              NF < 2 { next }
+              { c[$1]++; s[$1] += ($3 ~ /^[0-9]+$/ ? $3 : mb[$2]) }
               END { printf "prunable %d %d\nheld %d %d\nunmerged %d %d\n", c["prunable"], s["prunable"], c["held"], s["held"], c["unmerged"], s["unmerged"] }' \
           > "$state.tmp"
         # F3678: the archive the prune hook fills (and empties after 30 days), counted the same way
-        an=0; am=0
+        an=0; am=0; ap=0
         if [ -d .claude/worktree-archive ]; then
           an=$(find .claude/worktree-archive/ -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -cd '0-9')
           am=$(du -sm .claude/worktree-archive/ 2>/dev/null | cut -f1)
+          # WP2/WP3: the changes of pruned worktrees, one .patch each
+          ap=$(find .claude/worktree-archive/ -mindepth 1 -maxdepth 1 -type f -name '*.patch' 2>/dev/null | wc -l | tr -cd '0-9')
         fi
-        printf 'archive %d %d\n' "${an:-0}" "${am:-0}" >> "$state.tmp" && mv "$state.tmp" "$state"
+        printf 'archive %d %d %d\n' "${an:-0}" "${am:-0}" "${ap:-0}" >> "$state.tmp" && mv "$state.tmp" "$state"
       fi
     ) </dev/null >/dev/null 2>&1 &
   fi
@@ -161,22 +177,22 @@ EOF
     fi
     left=""; arch=""
     if [ -f "$state" ]; then
-      read -r _ pn pm _ hn hm _ un um _ an am <<EOF
+      read -r _ pn pm _ hn hm _ un um _ an am ap <<EOF
 $(tr '\n' ' ' < "$state")
 EOF
       left=" Left: ${pn:-0} merged (${pm:-0} MB) for its next run, ${hn:-0} merged but held (${hm:-0} MB), ${un:-0} unmerged (${um:-0} MB)."
-      [ "${an:-0}" -gt 0 ] 2>/dev/null && arch=" .claude/worktree-archive holds ${an} folder(s) (${am:-0} MB) of untracked files from pruned worktrees; prune-worktrees.sh deletes those older than 30 days."
+      { [ "${an:-0}" -gt 0 ] || [ "${ap:-0}" -gt 0 ]; } 2>/dev/null && arch=" .claude/worktree-archive holds ${an:-0} folder(s) (${am:-0} MB) of untracked files$([ "${ap:-0}" -gt 0 ] 2>/dev/null && echo " and ${ap} patch(es) of changes") from pruned worktrees; prune-worktrees.sh deletes the folders older than 30 days."
     fi
-    add "- .claude/worktrees is ${mb} MB. ${eng}.${left} Nothing to do: a held worktree has a live agent, a lock or a change, and an unmerged one holds real work.${arch}"
+    add "- .claude/worktrees is ${mb} MB. ${eng}.${left} Nothing to do: a held worktree has a live agent, a lock or a change from the last 24 h, and an unmerged one holds real work.${arch}"
   elif [ "${mb:-0}" -gt "$WORKTREE_MB" ]; then
     if [ -f "$state" ]; then
       # "<class> <count> <MB>" per line
-      read -r _ pn pm _ hn hm _ un um _ an am <<EOF
+      read -r _ pn pm _ hn hm _ un um _ an am ap <<EOF
 $(tr '\n' ' ' < "$state")
 EOF
       arch=""
-      [ "${an:-0}" -gt 0 ] 2>/dev/null && arch=" .claude/worktree-archive holds ${an} folder(s) (${am:-0} MB) of untracked files from pruned worktrees; prune-worktrees.sh deletes those older than 30 days."
-      add "- .claude/worktrees is ${mb} MB: ${pn:-0} merged (${pm:-0} MB) can be pruned now, ${hn:-0} merged but held (${hm:-0} MB), ${un:-0} unmerged (${um:-0} MB). Each agent worktree is a full checkout; prune-worktrees.sh removes the merged ones (locked, live or with tracked changes are held); the unmerged ones hold real work.${arch}"
+      { [ "${an:-0}" -gt 0 ] || [ "${ap:-0}" -gt 0 ]; } 2>/dev/null && arch=" .claude/worktree-archive holds ${an:-0} folder(s) (${am:-0} MB) of untracked files$([ "${ap:-0}" -gt 0 ] 2>/dev/null && echo " and ${ap} patch(es) of changes") from pruned worktrees; prune-worktrees.sh deletes the folders older than 30 days."
+      add "- .claude/worktrees is ${mb} MB: ${pn:-0} merged (${pm:-0} MB) can be pruned now, ${hn:-0} merged but held (${hm:-0} MB), ${un:-0} unmerged (${um:-0} MB). Each agent worktree is a full checkout; prune-worktrees.sh removes the merged ones (a live agent's, or one with real changes from the last 24 h, is held) and the folders of unmerged ones idle 7 days (branch and a patch kept); the rest hold real work.${arch}"
     else
       add "- .claude/worktrees is ${mb} MB. Each agent worktree is a full checkout; merged and unmerged are not counted yet (the next measure sorts them)."
     fi

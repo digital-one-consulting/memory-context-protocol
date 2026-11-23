@@ -204,21 +204,27 @@ O="$TMP/sim.git"; R="$TMP/sim"; rm -rf "$O" "$R"; mkdir -p "$R"
   && git merge -q --squash squashed >/dev/null && git commit -qm "squashed (#1)" \
   && git push -q origin dev/simulator \
   && echo edit > .claude/worktrees/edited/edited \
-  && mkdir -p .claude/worktrees/landed/output && echo shot > .claude/worktrees/landed/output/s.png ) 2>/dev/null
+  && mkdir -p .claude/worktrees/landed/docs .claude/worktrees/landed/dist && echo shot > .claude/worktrees/landed/docs/s.png && echo js > .claude/worktrees/landed/dist/app.js ) 2>/dev/null
 touch -t 202001010000 "$R/.claude/worktrees/landed" "$R/.claude/worktrees/picked" "$R/.claude/worktrees/squashed" "$R/.claude/worktrees/edited"
 for f in HEAD index logs/HEAD gitdir; do
   for w in landed picked squashed edited; do [ -e "$R/.git/worktrees/$w/$f" ] && touch -t 202001010000 "$R/.git/worktrees/$w/$f"; done
 done
 export MCP_PRUNE_MIN_AGE_MIN=60
-out=$(cd "$R" && CLAUDE_PROJECT_DIR="$R" "$HOOKS/prune-worktrees.sh" --report | sort | tr '\t\n' ': ')
+report=$(cd "$R" && CLAUDE_PROJECT_DIR="$R" "$HOOKS/prune-worktrees.sh" --report)
+out=$(printf '%s\n' "$report" | cut -f1,2 | sort | tr '\t\n' ': ')
 assert_eq "report: the desk's base, not main; a tracked edit and a young one are held" "$out" "held:edited held:young prunable:landed prunable:picked prunable:squashed unmerged:open "
 assert_dir "report removes nothing" "$R/.claude/worktrees/landed"
+# each line: its own du in MB and why it stays or goes (the budget line once said 50 MB for 5.8 GB)
+assert_contains "report: the held one names its changed file" "$report" "$(printf 'held\tedited\t')"
+assert_contains "report: why a tracked edit holds it" "$report" "changed: edited, last "
+assert_contains "report: generated files (dist/) do not hold it" "$report" "untracked file(s) move to .claude/worktree-archive/landed/"
+assert_eq "report: every line has a size in MB" "$(printf '%s\n' "$report" | awk -F '\t' '$3 !~ /^[0-9]+$/' | wc -l | tr -d ' ')" "0"
 out=$(cd "$R" && CLAUDE_PROJECT_DIR="$R" "$HOOKS/prune-worktrees.sh"); rc=$?
 assert_contains "prunes what dev/simulator contains, by ancestry, by patch and by content" "$out" "pruned 3 merged agent worktree(s)"
 assert_no_dir "squash-merged into dev/simulator (cherry says +, the content is there): removed" "$R/.claude/worktrees/squashed"
 assert_no_dir "merged into dev/simulator: removed" "$R/.claude/worktrees/landed"
 assert_no_dir "cherry-picked into dev/simulator (git cherry, no +): removed" "$R/.claude/worktrees/picked"
-assert_file "the untracked screenshot is archived" "$R/.claude/worktree-archive/landed/output/s.png"
+assert_file "the untracked screenshot is archived" "$R/.claude/worktree-archive/landed/docs/s.png"
 assert_dir "unmerged: kept" "$R/.claude/worktrees/open"
 assert_dir "merged with a tracked edit: kept" "$R/.claude/worktrees/edited"
 assert_dir "merged but young (touched within MCP_PRUNE_MIN_AGE_MIN): kept" "$R/.claude/worktrees/young"
@@ -238,13 +244,38 @@ touch -t 202001010000 "$R/.claude/worktree-archive/old"
 out=$(cd "$R" && CLAUDE_PROJECT_DIR="$R" "$HOOKS/prune-worktrees.sh")
 assert_contains "the line counts the archived folders it deleted" "$out" "deleted 1 archived folder(s) older than 30 days from .claude/worktree-archive/"
 assert_no_dir "an archive folder older than 30 days: deleted" "$R/.claude/worktree-archive/old"
-assert_file "a younger archive folder: kept" "$R/.claude/worktree-archive/landed/output/s.png"
+assert_file "a younger archive folder: kept" "$R/.claude/worktree-archive/landed/docs/s.png"
 rm -f "$P/.claude/.worktrees-mb" "$P/.claude/.worktrees-state"
 ( cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" MCP_WORKTREE_MB=0 "$HOOKS/context-budget.sh" >/dev/null )
 for _ in $(seq 1 100); do [ -s "$P/.claude/.worktrees-state" ] && break; sleep 0.1; done
 out=$(cd "$P" && CLAUDE_PROJECT_DIR="$P" MCP_PROJECTS_DIR="$TMP/no-projects" MCP_WORKTREE_MB=0 "$HOOKS/context-budget.sh")
 assert_contains "the budget line counts the archive" "$out" ".claude/worktree-archive holds 1 folder(s) ("
 unset MCP_PRUNE_MIN_AGE_MIN
+
+# WP1-WP3: generated files alone go; old real changes and idle unmerged folders go after a patch
+R="$TMP/wp"; mkdir -p "$R"
+( cd "$R" && git init -q -b main && git config user.email t@t && git config user.name t \
+  && echo a > a && echo '- [todo] X1' > TODO.md && git add -A && git commit -qm init \
+  && for w in gen real idle; do git worktree add -q -b "$w" ".claude/worktrees/$w" || exit 1; done \
+  && echo '- [done] X1' > .claude/worktrees/gen/TODO.md && mkdir -p .claude/worktrees/gen/output && echo s > .claude/worktrees/gen/output/s.png \
+  && echo edit > .claude/worktrees/real/a && echo note > .claude/worktrees/real/note.md \
+  && ( cd .claude/worktrees/idle && echo w > w && git add w \
+       && GIT_COMMITTER_DATE="2020-01-01T00:00:00" git commit -qm w && echo wip > w ) ) >/dev/null 2>&1
+for w in gen real idle; do
+  find "$R/.claude/worktrees/$w" -exec touch -t 202001010000 {} +
+  for f in HEAD index logs/HEAD gitdir; do [ -e "$R/.git/worktrees/$w/$f" ] && touch -t 202001010000 "$R/.git/worktrees/$w/$f"; done
+done
+out=$(cd "$R" && CLAUDE_PROJECT_DIR="$R" "$HOOKS/prune-worktrees.sh")
+assert_contains "generated-only and old real changes: both merged ones go" "$out" "pruned 2 merged agent worktree(s)"
+assert_contains "the idle unmerged folder goes" "$out" "removed the folders of 1 idle unmerged worktree(s), branches kept"
+assert_no_dir "generated dirt (TODO.md, output/) does not hold" "$R/.claude/worktrees/gen"
+assert_no_dir "real changes older than 24 h: removed" "$R/.claude/worktrees/real"
+assert_no_dir "idle unmerged: its folder removed" "$R/.claude/worktrees/idle"
+assert_eq "idle unmerged: its branch kept" "$(git -C "$R" branch --list idle | tr -d ' *')" "idle"
+assert_file "real changes saved as a patch" "$R/.claude/worktree-archive/real.patch"
+assert_contains "the patch holds the untracked file" "$(cat "$R/.claude/worktree-archive/real.patch")" "+note"
+assert_file "the idle worktree's change saved as a patch" "$R/.claude/worktree-archive/idle.patch"
+assert_contains "the idle patch holds the uncommitted edit" "$(cat "$R/.claude/worktree-archive/idle.patch")" "+wip"
 
 echo "stop-handoff.sh"
 S="$TMP/stop"; rm -rf "$S"; mkdir -p "$S/.claude/hooks"
